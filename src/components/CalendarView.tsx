@@ -109,8 +109,14 @@ function SyncBadge({ status, result, error, onSync }: {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+function isoToFirstDay(isoDate: string): number {
+  const [y, m, d] = isoDate.split('-').map(Number)
+  return new Date(y, m - 1, d).getDay() // 0=Sun, 1=Mon, ...
+}
+
 export function CalendarView({ plan, config, onChange, gcal }: Props) {
   const calendarRef = useRef<FullCalendar>(null)
+  const firstDay = isoToFirstDay(config.weekStartDate)
 
   function handleEventDrop(info: EventDropArg) {
     const { event } = info
@@ -231,7 +237,7 @@ export function CalendarView({ plan, config, onChange, gcal }: Props) {
           droppable={false}
           eventDrop={handleEventDrop}
           eventResize={handleEventResize}
-          firstDay={1}
+          firstDay={firstDay}
           slotMinTime="05:00:00"
           slotMaxTime="23:00:00"
           allDaySlot={true}

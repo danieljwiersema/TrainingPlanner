@@ -8,9 +8,8 @@ const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const INTENSITIES: WeekIntensity[] = ['light', 'moderate', 'hard', 'peak']
 
 function getDayLabel(weekStart: string, offset: number): string {
-  const d = new Date(weekStart + 'T00:00:00')
-  d.setDate(d.getDate() + offset)
-  return DAY_SHORT[d.getDay()]
+  const [y, m, d] = weekStart.split('-').map(Number)
+  return DAY_SHORT[new Date(y, m - 1, d + offset).getDay()]
 }
 
 const INTENSITY_COLORS: Record<WeekIntensity, string> = {

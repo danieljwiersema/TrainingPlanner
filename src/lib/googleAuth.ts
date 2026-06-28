@@ -92,9 +92,9 @@ export async function getOrCreateTrainingCalendar(token: string): Promise<string
 }
 
 export async function fetchCalendarEvents(token: string, weekStartDate: string): Promise<GCalEvent[]> {
-  const start = new Date(weekStartDate + 'T00:00:00')
-  const end = new Date(start)
-  end.setDate(end.getDate() + 7)
+  const [y, m, d] = weekStartDate.split('-').map(Number)
+  const start = new Date(y, m - 1, d)
+  const end = new Date(y, m - 1, d + 7)
 
   const params = new URLSearchParams({
     timeMin: start.toISOString(),

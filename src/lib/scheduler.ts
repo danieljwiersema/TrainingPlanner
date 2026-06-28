@@ -5,8 +5,8 @@ import { isHard } from './validator'
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function getDayName(isoDate: string): string {
-  const d = new Date(isoDate + 'T00:00:00')
-  return DAY_SHORT[d.getDay()]
+  const [y, m, d] = isoDate.split('-').map(Number)
+  return DAY_SHORT[new Date(y, m - 1, d).getDay()]
 }
 
 const FOCUS_ZONES: Record<WeekIntensity, Zone[]> = {
@@ -41,9 +41,9 @@ function makeSession(sport: SportDef, zone: Zone, durationMin: number): Session 
 }
 
 export function addDays(isoDate: string, n: number): string {
-  const d = new Date(isoDate + 'T00:00:00')
-  d.setDate(d.getDate() + n)
-  return d.toISOString().slice(0, 10)
+  const [y, m, d] = isoDate.split('-').map(Number)
+  const date = new Date(y, m - 1, d + n)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 interface PlannedSlot {

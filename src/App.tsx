@@ -43,7 +43,11 @@ function loadSavedConfig(): PlanConfig {
 function loadSavedPlan(cfg: PlanConfig): DayPlan[] {
   try {
     const s = localStorage.getItem(`tplanner-plan-${cfg.weekStartDate}`)
-    if (s) return JSON.parse(s) as DayPlan[]
+    if (s) {
+      const saved = JSON.parse(s) as DayPlan[]
+      // Always rebuild day structure fresh (correct dates/names), only restore sessions
+      return emptyPlan(cfg).map((day, i) => ({ ...day, sessions: saved[i]?.sessions ?? [] }))
+    }
   } catch {}
   return emptyPlan(cfg)
 }

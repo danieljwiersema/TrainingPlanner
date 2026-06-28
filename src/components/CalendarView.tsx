@@ -231,6 +231,7 @@ export function CalendarView({ plan, config, onChange, gcal }: Props) {
           droppable={false}
           eventDrop={handleEventDrop}
           eventResize={handleEventResize}
+          firstDay={1}
           slotMinTime="05:00:00"
           slotMaxTime="23:00:00"
           allDaySlot={true}

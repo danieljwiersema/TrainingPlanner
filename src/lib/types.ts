@@ -11,6 +11,7 @@ export interface SportDef {
 export interface SportTarget {
   sessionsPerWeek: number | 'auto'
   minutesPerWeek?: number
+  intensity?: WeekIntensity  // overrides global weekIntensity for this sport
 }
 
 export interface Session {
@@ -20,6 +21,7 @@ export interface Session {
   durationMin: number
   startTime?: string   // "07:30"
   label: string
+  notes?: string
   userEdited?: boolean
   locked?: boolean
 }
@@ -38,6 +40,7 @@ export interface PlanConfig {
   weekStartDate: string   // ISO date 'YYYY-MM-DD', Monday
   dailyMinutes: number[]  // 0=Mon … 6=Sun
   targets: Record<string, SportTarget>
+  preferredStartTimes?: (string | undefined)[]  // "07:30" per day, 7 values
 }
 
 export interface PlanWarning {

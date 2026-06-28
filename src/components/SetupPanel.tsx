@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import type { PlanConfig, WeekIntensity, SportDef } from '../lib/types'
+import type { PlanConfig, WeekIntensity, SportDef, WeekIntensity as WI } from '../lib/types'
 import { SportTargetRow } from './SportTargetRow'
 import { AddSportForm } from './AddSportForm'
+import { InfoIcon } from './Tooltip'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const INTENSITIES: WeekIntensity[] = ['light', 'moderate', 'hard', 'peak']
@@ -24,9 +25,10 @@ interface Props {
   config: PlanConfig
   onChange: (config: PlanConfig) => void
   onGenerate: () => void
+  onShowTemplates: () => void
 }
 
-export function SetupPanel({ config, onChange, onGenerate }: Props) {
+export function SetupPanel({ config, onChange, onGenerate, onShowTemplates }: Props) {
   const [showAddSport, setShowAddSport] = useState(false)
 
   function setDay(i: number, val: string) {
@@ -34,6 +36,12 @@ export function SetupPanel({ config, onChange, onGenerate }: Props) {
     const next = [...config.dailyMinutes]
     next[i] = mins
     onChange({ ...config, dailyMinutes: next })
+  }
+
+  function setPreferredTime(i: number, time: string | undefined) {
+    const next: (string | undefined)[] = [...(config.preferredStartTimes ?? Array(7).fill(undefined))]
+    next[i] = time
+    onChange({ ...config, preferredStartTimes: next })
   }
 
   function setSessions(sportId: string, n: number | 'auto') {
@@ -53,6 +61,16 @@ export function SetupPanel({ config, onChange, onGenerate }: Props) {
       targets: {
         ...config.targets,
         [sportId]: { ...config.targets[sportId], minutesPerWeek: val },
+      },
+    })
+  }
+
+  function setIntensity(sportId: string, intensity: WI | undefined) {
+    onChange({
+      ...config,
+      targets: {
+        ...config.targets,
+        [sportId]: { ...config.targets[sportId], intensity },
       },
     })
   }
@@ -87,7 +105,13 @@ export function SetupPanel({ config, onChange, onGenerate }: Props) {
       <div className="p-5 space-y-6">
 
         <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Week Starting</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Week Starting</p>
+            <button
+              onClick={onShowTemplates}
+              className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+            >Templates</button>
+          </div>
           <input
             type="date"
             value={config.weekStartDate}
@@ -97,7 +121,10 @@ export function SetupPanel({ config, onChange, onGenerate }: Props) {
         </div>
 
         <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Sports & Sessions</p>
+          <div className="flex items-center mb-3">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Sports & Sessions</p>
+            <InfoIcon tooltip="Click a sport name to set it as the focus sport. The focus sport gets harder zone assignments and scheduling priority." />
+          </div>
 
           <div className="space-y-3">
             {config.sports.map(sport => (
@@ -110,6 +137,7 @@ export function SetupPanel({ config, onChange, onGenerate }: Props) {
                 onRemove={() => removeSport(sport.id)}
                 onSetSessions={n => setSessions(sport.id, n)}
                 onSetMinutes={raw => setMinutes(sport.id, raw)}
+                onSetIntensity={intensity => setIntensity(sport.id, intensity)}
               />
             ))}
           </div>
@@ -123,10 +151,7 @@ export function SetupPanel({ config, onChange, onGenerate }: Props) {
 
           <div className="mt-3">
             {showAddSport ? (
-              <AddSportForm
-                onAdd={addSport}
-                onCancel={() => setShowAddSport(false)}
-              />
+              <AddSportForm onAdd={addSport} onCancel={() => setShowAddSport(false)} />
             ) : (
               <button onClick={() => setShowAddSport(true)}
                 className="w-full py-2 text-xs border-2 border-dashed border-gray-200 rounded-lg text-gray-400 hover:border-blue-300 hover:text-blue-500 transition-colors"
@@ -136,7 +161,10 @@ export function SetupPanel({ config, onChange, onGenerate }: Props) {
         </div>
 
         <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Week Intensity</p>
+          <div className="flex items-center mb-2">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Default Intensity</p>
+            <InfoIcon tooltip="Controls how hard the overall week is. Applies to all sports unless overridden per-sport above." />
+          </div>
           <div className="grid grid-cols-2 gap-2">
             {INTENSITIES.map(w => (
               <button key={w}
@@ -150,17 +178,32 @@ export function SetupPanel({ config, onChange, onGenerate }: Props) {
         </div>
 
         <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Time Available</p>
+          <div className="flex items-center mb-2">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Time Available</p>
+            <InfoIcon tooltip="Set daily time budget and optional session start time. The scheduler fills the budget with sessions." />
+          </div>
           <div className="space-y-2">
             {DAYS.map((day, i) => {
               const mins = config.dailyMinutes[i] ?? 0
+              const prefTime = config.preferredStartTimes?.[i] ?? ''
               return (
                 <div key={day} className="space-y-0.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-gray-400 w-7">{day}</span>
-                    <span className="text-xs text-gray-500 font-medium">
-                      {mins === 0 ? 'Rest' : mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h${mins % 60 ? ` ${mins % 60}m` : ''}`}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {mins > 0 && (
+                        <input
+                          type="time"
+                          value={prefTime}
+                          onChange={e => setPreferredTime(i, e.target.value || undefined)}
+                          title="Preferred session start time"
+                          className="text-xs text-gray-400 border border-gray-100 rounded px-1 py-0.5 w-[72px] focus:outline-none focus:ring-1 focus:ring-blue-300"
+                        />
+                      )}
+                      <span className="text-xs text-gray-500 font-medium w-12 text-right">
+                        {mins === 0 ? 'Rest' : mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h${mins % 60 ? ` ${mins % 60}m` : ''}`}
+                      </span>
+                    </div>
                   </div>
                   <input
                     type="range" min={0} max={240} step={15}

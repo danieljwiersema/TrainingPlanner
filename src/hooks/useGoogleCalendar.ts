@@ -9,6 +9,7 @@ import {
 import type { DayPlan, PlanConfig } from '../lib/types'
 
 export type SyncStatus = 'idle' | 'syncing' | 'done' | 'error'
+export type GCalState = ReturnType<typeof useGoogleCalendar>
 
 export function useGoogleCalendar(plan: DayPlan[], config: PlanConfig) {
   const [clientId, setClientIdState] = useState(() => localStorage.getItem('gcal-client-id') ?? '')

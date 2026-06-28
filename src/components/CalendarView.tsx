@@ -6,7 +6,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import type { EventDropArg, EventInput } from '@fullcalendar/core'
 import type { EventResizeDoneArg } from '@fullcalendar/interaction'
 import type { DayPlan, PlanConfig } from '../lib/types'
-import { useGoogleCalendar, type SyncStatus } from '../hooks/useGoogleCalendar'
+import { type SyncStatus, type GCalState } from '../hooks/useGoogleCalendar'
 import { type GCalEvent, type SyncResult } from '../lib/googleAuth'
 import { GoogleConnect } from './GoogleConnect'
 
@@ -14,6 +14,7 @@ interface Props {
   plan: DayPlan[]
   config: PlanConfig
   onChange: (plan: DayPlan[]) => void
+  gcal: GCalState
 }
 
 // ─── Event conversion ─────────────────────────────────────────────────────────
@@ -108,8 +109,7 @@ function SyncBadge({ status, result, error, onSync }: {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function CalendarView({ plan, config, onChange }: Props) {
-  const gcal = useGoogleCalendar(plan, config)
+export function CalendarView({ plan, config, onChange, gcal }: Props) {
   const calendarRef = useRef<FullCalendar>(null)
 
   function handleEventDrop(info: EventDropArg) {

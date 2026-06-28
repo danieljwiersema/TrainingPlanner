@@ -23,7 +23,7 @@ interface Props {
   onToggleLock: () => void
 }
 
-export function SessionBlock({ session, sport, dayIndex, isoDate, warnings, onTimeChange, onEdit, onDelete, onToggleLock }: Props) {
+export function SessionBlock({ session, sport, dayIndex, warnings, onTimeChange, onEdit, onDelete, onToggleLock }: Props) {
   const timeInputRef = useRef<HTMLInputElement>(null)
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -80,6 +80,9 @@ export function SessionBlock({ session, sport, dayIndex, isoDate, warnings, onTi
           <span className="text-xs text-gray-500">{session.durationMin} min</span>
           {session.locked && <span className="text-xs text-blue-500 font-medium">locked</span>}
         </div>
+        {session.notes && (
+          <p className="text-xs text-gray-400 mt-1.5 leading-snug line-clamp-2">{session.notes}</p>
+        )}
 
         <div className="mt-2 flex items-center gap-1.5">
           <span className="text-xs text-gray-400">🕐</span>

@@ -1,5 +1,6 @@
 import { useDroppable } from '@dnd-kit/core'
 import type { DayPlan, PlanWarning, SportDef } from '../lib/types'
+import type { GCalEvent } from '../lib/googleAuth'
 import { SessionBlock } from './SessionBlock'
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
   dayIndex: number
   sports: SportDef[]
   warnings: PlanWarning[]
+  gcalEvents: GCalEvent[]
   onAdd: () => void
   onEdit: (sessionId: string) => void
   onDelete: (sessionId: string) => void
@@ -14,7 +16,15 @@ interface Props {
   onToggleLock: (sessionId: string) => void
 }
 
-export function DayColumn({ day, dayIndex, sports, warnings, onAdd, onEdit, onDelete, onTimeChange, onToggleLock }: Props) {
+function fmtTime(iso: string): string {
+  const t = iso.slice(11, 16)
+  if (!t) return ''
+  const [h, m] = t.split(':').map(Number)
+  const ampm = h >= 12 ? 'pm' : 'am'
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')}${ampm}`
+}
+
+export function DayColumn({ day, dayIndex, sports, warnings, gcalEvents, onAdd, onEdit, onDelete, onTimeChange, onToggleLock }: Props) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-${dayIndex}` })
 
   return (
@@ -83,6 +93,17 @@ export function DayColumn({ day, dayIndex, sports, warnings, onAdd, onEdit, onDe
         >
           <span className="text-base leading-none">+</span> Add
         </button>
+
+        {gcalEvents.length > 0 && (
+          <div className="space-y-1 mt-1 pt-1 border-t border-gray-100">
+            {gcalEvents.map(e => (
+              <div key={e.id} className="text-xs text-gray-400 bg-gray-50 rounded-lg px-2 py-1 flex items-center gap-1 min-w-0">
+                <span className="shrink-0">📅</span>
+                <span className="truncate">{e.allDay ? '' : fmtTime(e.start) + ' '}{e.title}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

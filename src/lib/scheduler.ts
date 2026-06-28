@@ -35,7 +35,7 @@ function makeSession(sport: SportDef, zone: Zone, durationMin: number): Session 
   return { id: uid(), sportId: sport.id, zone, durationMin, label: getLabel(sport, zone) }
 }
 
-function addDays(isoDate: string, n: number): string {
+export function addDays(isoDate: string, n: number): string {
   const d = new Date(isoDate + 'T00:00:00')
   d.setDate(d.getDate() + n)
   return d.toISOString().slice(0, 10)
@@ -66,9 +66,10 @@ function buildSlots(config: PlanConfig, lockedCountBySport: Record<string, numbe
 
   if (focusSport) {
     const t = targets[focus]
+    const sportIntensity = t?.intensity ?? weekIntensity
     const total = resolveSessionCount(focusSport, t, dailyMinutes)
     const n = Math.max(0, total - (lockedCountBySport[focus] ?? 0))
-    const focusZones = FOCUS_ZONES[weekIntensity]
+    const focusZones = FOCUS_ZONES[sportIntensity]
     for (let i = 0; i < n; i++) {
       slots.push({
         sport: focusSport,
@@ -82,9 +83,10 @@ function buildSlots(config: PlanConfig, lockedCountBySport: Record<string, numbe
 
   for (const sport of secondaries) {
     const t = targets[sport.id]
+    const sportIntensity = t?.intensity ?? weekIntensity
     const total = resolveSessionCount(sport, t, dailyMinutes)
     const n = Math.max(0, total - (lockedCountBySport[sport.id] ?? 0))
-    const secZones = SECONDARY_ZONES[weekIntensity]
+    const secZones = SECONDARY_ZONES[sportIntensity]
     for (let i = 0; i < n; i++) {
       slots.push({
         sport,
@@ -146,6 +148,21 @@ function scoreDayForSlot(
   if (placed[dayIdx].length === 0) score -= 8
 
   return score
+}
+
+function computeStartTime(preferred: string, existing: Session[]): string {
+  const [ph, pm] = preferred.split(':').map(Number)
+  let startMin = ph * 60 + pm
+  for (const s of existing) {
+    if (s.startTime) {
+      const [sh, sm] = s.startTime.split(':').map(Number)
+      const endMin = sh * 60 + sm + s.durationMin + 15
+      if (endMin > startMin) startMin = endMin
+    }
+  }
+  const h = Math.floor(startMin / 60) % 24
+  const m = startMin % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 export function emptyPlan(config: PlanConfig): DayPlan[] {
@@ -211,7 +228,10 @@ export function generatePlan(config: PlanConfig, existingPlan?: DayPlan[]): DayP
 
     if (duration < MIN_DURATION) continue
 
-    placed[dayIdx].push(makeSession(slot.sport, slot.zone, duration))
+    const session = makeSession(slot.sport, slot.zone, duration)
+    const pt = config.preferredStartTimes?.[dayIdx]
+    if (pt) session.startTime = computeStartTime(pt, placed[dayIdx])
+    placed[dayIdx].push(session)
     remaining[dayIdx] -= duration
     lastDayForSport.set(slot.sport.id, dayIdx)
   }

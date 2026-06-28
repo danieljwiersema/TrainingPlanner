@@ -104,18 +104,35 @@ export async function fetchCalendarEvents(token: string, weekStartDate: string):
     maxResults: '250',
   })
 
-  const res = await apiFetch(token, `/calendars/primary/events?${params}`)
-  const data = await res.json() as {
-    items: { id: string; summary: string; start: { dateTime?: string; date?: string }; end: { dateTime?: string; date?: string } }[]
-  }
+  // Get all calendars the user has access to
+  const listRes = await apiFetch(token, '/users/me/calendarList')
+  const list = await listRes.json() as { items: { id: string; accessRole: string }[] }
+  const calendarIds = list.items
+    .filter(c => c.accessRole === 'owner' || c.accessRole === 'writer' || c.accessRole === 'reader')
+    .map(c => c.id)
 
-  return data.items.map(e => ({
-    id: e.id,
-    title: e.summary ?? '(no title)',
-    start: e.start.dateTime ?? e.start.date ?? '',
-    end: e.end.dateTime ?? e.end.date ?? '',
-    allDay: !e.start.dateTime,
+  const allEvents: GCalEvent[] = []
+  await Promise.all(calendarIds.map(async calId => {
+    try {
+      const res = await apiFetch(token, `/calendars/${encodeURIComponent(calId)}/events?${params}`)
+      const data = await res.json() as {
+        items: { id: string; summary: string; start: { dateTime?: string; date?: string }; end: { dateTime?: string; date?: string } }[]
+      }
+      for (const e of data.items ?? []) {
+        allEvents.push({
+          id: `${calId}::${e.id}`,
+          title: e.summary ?? '(no title)',
+          start: e.start.dateTime ?? e.start.date ?? '',
+          end: e.end.dateTime ?? e.end.date ?? '',
+          allDay: !e.start.dateTime,
+        })
+      }
+    } catch {
+      // skip calendars we can't read
+    }
   }))
+
+  return allEvents
 }
 
 function addMinutes(time: string, minutes: number): string {

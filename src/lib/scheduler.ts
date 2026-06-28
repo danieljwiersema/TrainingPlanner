@@ -2,7 +2,12 @@ import type { Zone, Session, DayPlan, PlanConfig, WeekIntensity, SportDef, Sport
 import { getLabel } from './labelUtils'
 import { isHard } from './validator'
 
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function getDayName(isoDate: string): string {
+  const d = new Date(isoDate + 'T00:00:00')
+  return DAY_SHORT[d.getDay()]
+}
 
 const FOCUS_ZONES: Record<WeekIntensity, Zone[]> = {
   light:    ['easy',     'recovery', 'easy',     'recovery'],
@@ -166,19 +171,19 @@ function computeStartTime(preferred: string, existing: Session[]): string {
 }
 
 export function emptyPlan(config: PlanConfig): DayPlan[] {
-  return Array.from({ length: 7 }, (_, i) => ({
-    day: DAYS[i],
-    date: addDays(config.weekStartDate, i),
-    availableMin: config.dailyMinutes[i],
-    sessions: [],
-  }))
+  const n = config.numDays ?? 7
+  return Array.from({ length: n }, (_, i) => {
+    const date = addDays(config.weekStartDate, i)
+    return { day: getDayName(date), date, availableMin: config.dailyMinutes[i] ?? 0, sessions: [] }
+  })
 }
 
 export function generatePlan(config: PlanConfig, existingPlan?: DayPlan[]): DayPlan[] {
   const { dailyMinutes, weekStartDate, focus } = config
+  const numDays = config.numDays ?? 7
 
   // Collect locked sessions per day and count per sport
-  const lockedByDay: Session[][] = Array.from({ length: 7 }, (_, i) =>
+  const lockedByDay: Session[][] = Array.from({ length: numDays }, (_, i) =>
     existingPlan?.[i]?.sessions.filter(s => s.locked) ?? []
   )
   const lockedCountBySport: Record<string, number> = {}
@@ -191,8 +196,8 @@ export function generatePlan(config: PlanConfig, existingPlan?: DayPlan[]): DayP
   const slots = buildSlots(config, lockedCountBySport)
 
   // Start remaining time after subtracting locked sessions
-  const remaining = dailyMinutes.map((mins, i) =>
-    Math.max(0, mins - lockedByDay[i].reduce((sum, s) => sum + s.durationMin, 0))
+  const remaining = Array.from({ length: numDays }, (_, i) =>
+    Math.max(0, (dailyMinutes[i] ?? 0) - lockedByDay[i].reduce((sum, s) => sum + s.durationMin, 0))
   )
 
   // placed starts with locked sessions; new sessions will be appended
@@ -212,7 +217,7 @@ export function generatePlan(config: PlanConfig, existingPlan?: DayPlan[]): DayP
   for (const slot of slots) {
     const cap = SPORT_SESSION_CAP[slot.sport.id] ?? DEFAULT_SESSION_CAP
 
-    const candidates = Array.from({ length: 7 }, (_, i) => ({
+    const candidates = Array.from({ length: numDays }, (_, i) => ({
       i,
       score: scoreDayForSlot(i, slot, placed, remaining, lastDayForSport, focus),
     }))
@@ -236,10 +241,8 @@ export function generatePlan(config: PlanConfig, existingPlan?: DayPlan[]): DayP
     lastDayForSport.set(slot.sport.id, dayIdx)
   }
 
-  return placed.map((sessions, i) => ({
-    day: DAYS[i],
-    date: addDays(weekStartDate, i),
-    availableMin: dailyMinutes[i],
-    sessions,
-  }))
+  return placed.map((sessions, i) => {
+    const date = addDays(weekStartDate, i)
+    return { day: getDayName(date), date, availableMin: dailyMinutes[i] ?? 0, sessions }
+  })
 }

@@ -40,7 +40,8 @@ export interface PlanConfig {
   weekStartDate: string   // ISO date 'YYYY-MM-DD', Monday
   dailyMinutes: number[]  // 0=Mon … 6=Sun
   targets: Record<string, SportTarget>
-  preferredStartTimes?: (string | undefined)[]  // "07:30" per day, 7 values
+  preferredStartTimes?: (string | undefined)[]  // "07:30" per day
+  numDays?: number  // how many days to schedule (default 7)
 }
 
 export interface PlanWarning {

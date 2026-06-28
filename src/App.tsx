@@ -110,8 +110,16 @@ export default function App() {
   }
 
   function handleConfigChange(next: PlanConfig) {
-    if (next.weekStartDate !== config.weekStartDate) {
+    const weekChanged = next.weekStartDate !== config.weekStartDate
+    const numDaysChanged = (next.numDays ?? 7) !== (config.numDays ?? 7)
+    if (weekChanged) {
       switchWeek(next)
+    } else if (numDaysChanged) {
+      setConfig(next)
+      const newPlan = emptyPlan(next)
+      setPlan(newPlan)
+      setWarnings([])
+      setHistory([])
     } else {
       setConfig(next)
     }

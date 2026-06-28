@@ -158,7 +158,7 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onRegenerate, onU
 
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="overflow-x-auto -mx-1 px-1">
-          <div className="grid grid-cols-7 gap-3 flex-1 min-h-0 min-w-[700px]">
+          <div className="grid gap-3 flex-1 min-h-0 min-w-[500px]" style={{ gridTemplateColumns: `repeat(${plan.length}, minmax(0, 1fr))` }}>
             {plan.map((day, i) => (
               <DayColumn
                 key={day.day}

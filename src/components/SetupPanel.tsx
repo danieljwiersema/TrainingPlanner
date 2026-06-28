@@ -4,8 +4,14 @@ import { SportTargetRow } from './SportTargetRow'
 import { AddSportForm } from './AddSportForm'
 import { InfoIcon } from './Tooltip'
 
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const INTENSITIES: WeekIntensity[] = ['light', 'moderate', 'hard', 'peak']
+
+function getDayLabel(weekStart: string, offset: number): string {
+  const d = new Date(weekStart + 'T00:00:00')
+  d.setDate(d.getDate() + offset)
+  return DAY_SHORT[d.getDay()]
+}
 
 const INTENSITY_COLORS: Record<WeekIntensity, string> = {
   light:    'bg-green-100 text-green-800 border-green-300',
@@ -179,15 +185,35 @@ export function SetupPanel({ config, onChange, onGenerate, onShowTemplates }: Pr
 
         <div>
           <div className="flex items-center mb-2">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Schedule Length</p>
+          </div>
+          <div className="flex gap-1.5">
+            {[3, 4, 5, 6, 7].map(n => (
+              <button
+                key={n}
+                onClick={() => onChange({ ...config, numDays: n })}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                  (config.numDays ?? 7) === n
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                }`}
+              >{n}d</button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center mb-2">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Time Available</p>
             <InfoIcon tooltip="Set daily time budget and optional session start time. The scheduler fills the budget with sessions." />
           </div>
           <div className="space-y-2">
-            {DAYS.map((day, i) => {
+            {Array.from({ length: config.numDays ?? 7 }, (_, i) => {
+              const day = getDayLabel(config.weekStartDate, i)
               const mins = config.dailyMinutes[i] ?? 0
               const prefTime = config.preferredStartTimes?.[i] ?? ''
               return (
-                <div key={day} className="space-y-0.5">
+                <div key={i} className="space-y-0.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-gray-400 w-7">{day}</span>
                     <div className="flex items-center gap-2">

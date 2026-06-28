@@ -2,7 +2,6 @@ import { useRef } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import type { Session, PlanWarning, SportDef } from '../lib/types'
-import { gcalUrl } from '../lib/calendar'
 
 const ZONE_BADGE: Record<string, string> = {
   recovery:   'bg-gray-100 text-gray-700',
@@ -110,14 +109,6 @@ export function SessionBlock({ session, sport, dayIndex, isoDate, warnings, onTi
           onClick={e => { e.stopPropagation(); onEdit() }}
           className="text-xs text-blue-600 hover:text-blue-800 font-medium"
         >Edit</button>
-        <a
-          href={gcalUrl(session, isoDate, sport)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onPointerDown={e => e.stopPropagation()}
-          onClick={e => e.stopPropagation()}
-          className="text-xs text-green-600 hover:text-green-800 font-medium"
-        >+ GCal</a>
         <button
           onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); onDelete() }}

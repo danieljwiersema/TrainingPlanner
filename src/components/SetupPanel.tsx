@@ -31,10 +31,14 @@ interface Props {
   onChange: (config: PlanConfig) => void
   onGenerate: () => void
   onShowTemplates: () => void
+  onAIGenerate: (prompt: string) => void
+  aiLoading: boolean
+  aiError: string | null
 }
 
-export function SetupPanel({ config, onChange, onGenerate, onShowTemplates }: Props) {
+export function SetupPanel({ config, onChange, onGenerate, onShowTemplates, onAIGenerate, aiLoading, aiError }: Props) {
   const [showAddSport, setShowAddSport] = useState(false)
+  const [aiPrompt, setAiPrompt] = useState('')
 
   function setDay(i: number, val: string) {
     const mins = Math.max(0, Math.min(240, Number(val) || 0))
@@ -248,6 +252,36 @@ export function SetupPanel({ config, onChange, onGenerate, onShowTemplates }: Pr
         >
           Generate Plan
         </button>
+
+        {/* AI section */}
+        <div className="border-t border-gray-100 pt-4 space-y-3">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">✨ AI Generate</p>
+
+          <textarea
+            value={aiPrompt}
+            onChange={e => setAiPrompt(e.target.value)}
+            placeholder="Optional note for the AI e.g. 'I have a race on Sunday, avoid hard sessions Friday'"
+            rows={2}
+            className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-600 placeholder-gray-300"
+          />
+
+          {aiError && (
+            <p className="text-xs text-red-500 bg-red-50 rounded-lg px-2.5 py-1.5 leading-snug">{aiError}</p>
+          )}
+
+          <button
+            onClick={() => onAIGenerate(aiPrompt)}
+            disabled={aiLoading}
+            className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white font-bold rounded-xl transition-colors text-sm flex items-center justify-center gap-2"
+          >
+            {aiLoading ? (
+              <>
+                <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Generating…
+              </>
+            ) : '✨ Generate with AI'}
+          </button>
+        </div>
       </div>
     </div>
   )

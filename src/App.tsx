@@ -3,6 +3,7 @@ import type { PlanConfig, DayPlan, PlanWarning } from './lib/types'
 import { DEFAULT_SPORTS } from './lib/types'
 import { generatePlan, emptyPlan, addDays } from './lib/scheduler'
 import { validatePlan } from './lib/validator'
+import { generatePlanWithAI } from './lib/aiPlanner'
 import { useGoogleCalendar } from './hooks/useGoogleCalendar'
 import { SetupPanel } from './components/SetupPanel'
 import { WeeklyGrid } from './components/WeeklyGrid'
@@ -60,6 +61,21 @@ export default function App() {
   const [history, setHistory] = useState<DayPlan[][]>([])
   const [showTemplates, setShowTemplates] = useState(() => !localStorage.getItem('tplanner-config'))
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+
+  async function handleAIGenerate(prompt: string) {
+    setAiLoading(true)
+    setAiError(null)
+    try {
+      const result = await generatePlanWithAI(config, plan, prompt)
+      applyPlan(result)
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'AI generation failed')
+    } finally {
+      setAiLoading(false)
+    }
+  }
 
   const gcal = useGoogleCalendar(plan, config)
 
@@ -221,6 +237,9 @@ export default function App() {
               onChange={handleConfigChange}
               onGenerate={handleGenerate}
               onShowTemplates={() => setShowTemplates(true)}
+              onAIGenerate={handleAIGenerate}
+              aiLoading={aiLoading}
+              aiError={aiError}
             />
           </div>
         )}

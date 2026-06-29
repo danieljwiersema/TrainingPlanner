@@ -40,6 +40,7 @@ export function AIWizard({ config, onGenerate, onEvaluate, onClose }: Props) {
   const [weaknesses, setWeaknesses] = useState<string[]>([])
   const [weaknessNote, setWeaknessNote] = useState('')
   const [injuries, setInjuries] = useState('')
+  const [constraints, setConstraints] = useState('')
   const [setupMode, setSetupMode] = useState<WizardAnswers['setupMode']>('current')
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([])
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, string>>({})
@@ -48,7 +49,7 @@ export function AIWizard({ config, onGenerate, onEvaluate, onClose }: Props) {
   const stepIndex = STEPS.indexOf(step as Step)
   const isFormStep = stepIndex >= 0
 
-  const answers: WizardAnswers = { purpose, level, levelNote, weaknesses, weaknessNote, injuries, setupMode }
+  const answers: WizardAnswers = { purpose, level, levelNote, weaknesses, weaknessNote, injuries, constraints, setupMode }
 
   function toggleWeakness(tag: string) {
     setWeaknesses(w => w.includes(tag) ? w.filter(t => t !== tag) : [...w, tag])
@@ -234,6 +235,16 @@ export function AIWizard({ config, onGenerate, onEvaluate, onClose }: Props) {
                   >{chip}</button>
                 ))}
               </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Any scheduling constraints? <span className="text-gray-400 font-normal">(optional)</span></label>
+                <textarea
+                  value={constraints}
+                  onChange={e => setConstraints(e.target.value)}
+                  placeholder="e.g. Can't run and row on the same day. No training before 7am. Must have Wednesday off."
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-700 placeholder-gray-300"
+                />
+              </div>
             </div>
           )}
 
@@ -256,6 +267,17 @@ export function AIWizard({ config, onGenerate, onEvaluate, onClose }: Props) {
                 <p className="text-xs text-gray-500 mt-1">Respects your sport targets, session counts, and daily time slots exactly as configured.</p>
               </button>
               <button
+                onClick={() => setSetupMode('ai-modality')}
+                className={`w-full p-4 rounded-xl border-2 text-left transition-colors ${
+                  setupMode === 'ai-modality'
+                    ? 'bg-orange-50 border-orange-400'
+                    : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                <p className="text-sm font-semibold text-gray-800">AI adjusts sport balance</p>
+                <p className="text-xs text-gray-500 mt-1">Daily time budgets stay fixed, but AI decides how many sessions of each sport based on your goals — ignoring your session count targets.</p>
+              </button>
+              <button
                 onClick={() => setSetupMode('ai-decides')}
                 className={`w-full p-4 rounded-xl border-2 text-left transition-colors ${
                   setupMode === 'ai-decides'
@@ -263,8 +285,8 @@ export function AIWizard({ config, onGenerate, onEvaluate, onClose }: Props) {
                     : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
                 }`}
               >
-                <p className="text-sm font-semibold text-gray-800">AI decides within my limits</p>
-                <p className="text-xs text-gray-500 mt-1">AI chooses which days to train, session lengths, and sport distribution — without ever exceeding your daily time budgets.</p>
+                <p className="text-sm font-semibold text-gray-800">AI decides everything</p>
+                <p className="text-xs text-gray-500 mt-1">AI chooses sports, session counts, and durations freely — only your daily time budgets are never exceeded.</p>
               </button>
             </div>
           )}

@@ -14,7 +14,8 @@ export interface WizardAnswers {
   weaknesses: string[]
   weaknessNote: string
   injuries: string
-  setupMode: 'current' | 'ai-decides'
+  constraints: string
+  setupMode: 'current' | 'ai-modality' | 'ai-decides'
 }
 
 export interface FollowUpQuestion {
@@ -60,48 +61,40 @@ export async function evaluateWizardAnswers(
   answers: WizardAnswers,
 ): Promise<{ ready: boolean; questions?: FollowUpQuestion[] }> {
   const focusSport = config.sports.find(s => s.id === config.focus)
-  const sportNames = config.sports.map(s => s.name).join(', ')
   const totalWeeklyMin = config.dailyMinutes.reduce((a, b) => a + b, 0)
 
-  const prompt = `You are preparing to generate a personalised training plan. Review the athlete's answers and decide if you need 1–2 more targeted questions to make the plan significantly better, or if you have enough to proceed.
+  const prompt = `You are preparing to generate a personalised training plan. Review the athlete's answers and decide if 1–2 more targeted questions would significantly improve the plan.
 
 ATHLETE ANSWERS:
-  Training purpose: "${answers.purpose}"
-  Experience level: ${answers.level}${answers.levelNote ? ` — specifically: "${answers.levelNote}"` : ''}
-  Weak areas / focus: ${answers.weaknesses.length ? answers.weaknesses.join(', ') : 'none specified'}${answers.weaknessNote ? ` — "${answers.weaknessNote}"` : ''}
-  Injuries / physical constraints: ${answers.injuries.trim() || 'none reported'}
-  Schedule preference: ${answers.setupMode === 'current' ? 'Use current setup exactly' : 'AI redistributes sessions within daily time budgets'}
+  Purpose: "${answers.purpose}"
+  Level: ${answers.level}${answers.levelNote ? ` — "${answers.levelNote}"` : ''}
+  Weak areas: ${answers.weaknesses.length ? answers.weaknesses.join(', ') : 'none'}${answers.weaknessNote ? ` — "${answers.weaknessNote}"` : ''}
+  Injuries: ${answers.injuries.trim() || 'none'}
+  Constraints: ${answers.constraints.trim() || 'none'}
+  Setup: ${answers.setupMode}
 
-THEIR CURRENT SETUP:
-  Sports: ${sportNames}
-  Primary focus sport: ${focusSport?.name ?? config.focus}
-  Weekly intensity: ${config.weekIntensity}
-  Total weekly time available: ${totalWeeklyMin}min across ${config.numDays ?? 7} days
+SETUP:
+  Sports: ${config.sports.map(s => s.name).join(', ')}
+  Focus: ${focusSport?.name ?? config.focus}
+  Intensity: ${config.weekIntensity}
+  Weekly time: ${totalWeeklyMin}min over ${config.numDays ?? 7} days
 
-Decide: does the purpose + level + focus give you enough to write a genuinely tailored plan? Or would 1–2 specific questions meaningfully improve it?
+Only ask follow-ups if the purpose mentions a specific event (ask timeframe/demands) or weaknesses are too vague to act on.
+Do NOT ask about things already known from their setup.
+Max 2 questions. If in doubt, proceed.
 
-Only ask follow-up questions if:
-- The purpose mentions a specific event/race (ask timeframe or specific demands)
-- The weaknesses are vague and specifics would change session design
-- There is an obvious gap that would affect session type or intensity choices
-
-Do NOT ask about things already answerable from their setup (sports, times, intensity).
-Do NOT ask more than 2 questions.
-If in doubt, proceed — a good plan is better than extra friction.
-
-Respond with raw JSON only, no markdown:
+Respond with raw JSON only:
 { "ready": true }
 OR
-{ "ready": false, "questions": [{ "id": "q1", "question": "...", "type": "select", "options": ["...", "..."] }, { "id": "q2", "question": "...", "type": "text" }] }`
+{ "ready": false, "questions": [{ "id": "q1", "question": "...", "type": "select", "options": ["..."] }] }`
 
   const text = await callGroq([
-    { role: 'system', content: 'You are an expert sports coach assistant. Respond with raw JSON only.' },
+    { role: 'system', content: 'You are a sports coach assistant. Respond with raw JSON only, no markdown.' },
     { role: 'user', content: prompt },
   ], 0.2)
 
   try {
-    const result = parseJSON(text) as { ready: boolean; questions?: FollowUpQuestion[] }
-    return result
+    return parseJSON(text) as { ready: boolean; questions?: FollowUpQuestion[] }
   } catch {
     return { ready: true }
   }
@@ -121,14 +114,28 @@ function buildPrompt(
   const days = baseDays.map((base, i) => existingPlan[i] ? { ...base, sessions: existingPlan[i].sessions } : base)
   const focusSport = config.sports.find(s => s.id === config.focus)
   const aiDecides = answers.setupMode === 'ai-decides'
+  const aiModality = answers.setupMode === 'ai-modality'
+
+  // Hard constraints — listed explicitly so the model treats them as inviolable
+  const hardConstraints: string[] = []
+  if (answers.injuries.trim())
+    hardConstraints.push(`INJURY: "${answers.injuries.trim()}" — do NOT schedule sessions that could aggravate this. Substitute with other sports or reduce intensity.`)
+  if (answers.constraints.trim())
+    hardConstraints.push(`SCHEDULING RULE: "${answers.constraints.trim()}" — follow this exactly, without exception.`)
+  hardConstraints.push('NEVER exceed the daily availableMin time budget on any day')
+  hardConstraints.push('NEVER include locked sessions in output (they are added automatically)')
+  hardConstraints.push('NEVER schedule hard or flat-out sessions on two consecutive days')
 
   const sportLines = config.sports.map(sport => {
     const t = config.targets[sport.id]
     if (!t) return null
+    if (aiModality || aiDecides) {
+      return `  - ${sport.name} (sportId: "${sport.id}")`
+    }
     const sess = t.sessionsPerWeek === 'auto' ? 'auto' : t.sessionsPerWeek
     const mins = t.minutesPerWeek ? `, ~${t.minutesPerWeek}min/week` : ''
     const intens = t.intensity ? `, intensity: ${t.intensity}` : ''
-    return `  - ${sport.name} (id: "${sport.id}"): ${sess} sessions/week${mins}${intens}`
+    return `  - ${sport.name} (sportId: "${sport.id}"): ${sess} sessions/week${mins}${intens}`
   }).filter(Boolean).join('\n')
 
   const dayLines = days.map((day, i) => {
@@ -136,91 +143,102 @@ function buildPrompt(
     const locked = day.sessions.filter(s => s.locked)
     const lockedMin = locked.reduce((sum, s) => sum + s.durationMin, 0)
     const remaining = Math.max(0, day.availableMin - lockedMin)
-
-    if (day.availableMin === 0) return `  - ${day.day} ${day.date}: REST DAY — empty sessions array`
-
-    const lockedDetail = locked.length > 0
-      ? ` (${lockedMin}min locked: ${locked.map(s => {
+    if (day.availableMin === 0) return `  ${day.day} ${day.date}: REST DAY → sessions: []`
+    const lockedNote = locked.length > 0
+      ? ` [${lockedMin}min already locked: ${locked.map(s => {
           const sp = config.sports.find(sp => sp.id === s.sportId)
-          return `${sp?.name ?? s.sportId} ${s.zone} ${s.durationMin}min`
-        }).join(' + ')})`
+          return `${sp?.name ?? s.sportId} ${s.durationMin}min`
+        }).join(' + ')}]`
       : ''
-
-    const timeNote = aiDecides
-      ? ` — budget up to ${day.availableMin}min, do not exceed`
-      : ` — fill with ${remaining}min of sessions`
-
-    return `  - ${day.day} ${day.date}:${pref ? ` preferred start ${pref},` : ''}${timeNote}${lockedDetail}`
+    const budget = (aiDecides || aiModality)
+      ? `budget MAX ${day.availableMin}min`
+      : `fill ${remaining}min`
+    return `  ${day.day} ${day.date}: ${budget}${pref ? ` start:${pref}` : ''}${lockedNote}`
   }).join('\n')
 
   const lockedContextLines = days.flatMap(day =>
     day.sessions.filter(s => s.locked).map(s => {
       const sp = config.sports.find(sp => sp.id === s.sportId)
-      return `  - ${day.day}: ${sp?.name ?? s.sportId} ${s.zone} ${s.durationMin}min [LOCKED — do not include in output]`
+      return `  ${day.day}: ${sp?.name ?? s.sportId} ${s.zone} ${s.durationMin}min — LOCKED, do not output`
     })
   )
 
-  const followUpContext = followUpQuestions.length > 0
-    ? followUpQuestions.map(q => `  - ${q.question}: ${followUpAnswers[q.id] ?? 'not answered'}`).join('\n')
-    : ''
+  const followUpContext = followUpQuestions
+    .filter(q => followUpAnswers[q.id])
+    .map(q => `  ${q.question}: ${followUpAnswers[q.id]}`)
+    .join('\n')
 
-  const levelDescriptions: Record<string, string> = {
-    beginner: 'New to training — keep intensity low, prioritise consistency over volume',
-    intermediate: 'Regular trainer — can handle moderate load with some harder sessions',
-    advanced: 'Experienced — periodised training, can sustain high load with proper recovery',
-    elite: 'High-performance athlete — sophisticated periodisation, maximal training stimulus',
+  const levelGuidance: Record<string, string> = {
+    beginner:     'BEGINNER: Keep 80%+ sessions easy/recovery. Max 1 moderate per week. No hard/flat-out.',
+    intermediate: 'INTERMEDIATE: 70% easy, 30% harder. One key hard session per week maximum.',
+    advanced:     'ADVANCED: Polarised — mostly easy with 1-2 genuinely hard sessions. Avoid moderate junk miles.',
+    elite:        'ELITE: Sophisticated periodisation. Maximal training stimulus with full recovery days.',
   }
 
-  return `You are an expert sports coach generating a personalised weekly training plan.
+  const modeDescription = aiDecides
+    ? 'AI DECIDES — choose sports, session counts, and durations freely. Stay within daily budgets. Prioritise quality over filling time completely.'
+    : aiModality
+      ? 'AI CHOOSES SPORTS — daily time budgets are fixed. You decide which sports and how many sessions based on the athlete\'s goal. Ignore session count targets.'
+      : 'FIXED SETUP — respect session count targets. Fill each day\'s remaining budget.'
 
-ATHLETE PROFILE:
-  Goal: "${answers.purpose}"
-  Level: ${answers.level} — ${levelDescriptions[answers.level]}${answers.levelNote ? ` (note: ${answers.levelNote})` : ''}
-  Weak areas / focus: ${answers.weaknesses.length ? answers.weaknesses.join(', ') : 'none specified'}${answers.weaknessNote ? ` — "${answers.weaknessNote}"` : ''}
-  Injuries / physical constraints: ${answers.injuries.trim() || 'none reported'}
-${followUpContext ? `  Additional context:\n${followUpContext}` : ''}
-SCHEDULE MODE: ${aiDecides
-    ? 'AI REDISTRIBUTES — you decide how to allocate sessions within each day\'s budget. Prioritise session quality over filling time. You can leave days partially filled.'
-    : 'FIXED SETUP — fill each day\'s remaining time budget with appropriate sessions.'}
+  const exampleDate = days[0]?.date ?? 'YYYY-MM-DD'
+  const exampleSport = config.sports[0]?.id ?? 'run'
 
-WEEK: ${numDays} days starting ${config.weekStartDate}
-FOCUS SPORT: ${focusSport?.name ?? config.focus} — this sport gets the most attention and harder zones
-OVERALL INTENSITY: ${config.weekIntensity}
+  return `You are an expert sports coach. Generate a weekly training plan as a raw JSON array.
 
-SPORTS & WEEKLY TARGETS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HARD CONSTRAINTS — NEVER VIOLATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${hardConstraints.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ATHLETE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Goal: "${answers.purpose}"
+${levelGuidance[answers.level]}${answers.levelNote ? `\nNote: "${answers.levelNote}"` : ''}
+Weaknesses: ${answers.weaknesses.length ? answers.weaknesses.join(', ') : 'none'}${answers.weaknessNote ? ` — "${answers.weaknessNote}"` : ''}
+${followUpContext ? `Extra context:\n${followUpContext}` : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCHEDULE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Mode: ${modeDescription}
+Week: ${numDays} days from ${config.weekStartDate}
+Focus sport: ${focusSport?.name ?? config.focus} — give this sport priority and harder zones
+Intensity: ${config.weekIntensity}
+
+Available sports:
 ${sportLines}
 
-DAILY SCHEDULE:
+Daily time budgets:
 ${dayLines}
-${lockedContextLines.length > 0 ? `
-LOCKED SESSIONS (do NOT include in output — added automatically):
-${lockedContextLines.join('\n')}
-` : ''}
-INTENSITY ZONES:
-  "recovery"  → Very easy, active recovery only
-  "easy"      → Comfortable aerobic, full conversation
-  "moderate"  → Steady/tempo, short sentences only
-  "hard"      → Threshold or intervals, barely speaking
-  "flat out"  → Maximum effort, VO2max or sprint
+${lockedContextLines.length > 0 ? `\nLocked sessions (DO NOT include in output):\n${lockedContextLines.join('\n')}` : ''}
 
-COACHING PRINCIPLES for this athlete:
-${answers.level === 'beginner' ? '  - Keep 80%+ of sessions easy or recovery. One moderate session maximum per week.' : ''}
-${answers.level === 'intermediate' ? '  - 70/30 easy-hard ratio. One key hard session, rest easy or moderate.' : ''}
-${answers.level === 'advanced' || answers.level === 'elite' ? '  - Polarised training: most sessions easy, 1-2 genuinely hard sessions, avoid "moderate junk miles".' : ''}
-${answers.purpose.toLowerCase().includes('race') || answers.purpose.toLowerCase().includes('event') || answers.purpose.toLowerCase().includes('compet') ? '  - Race-focused: include race-specific intensity (sport-specific hard sessions). Protect the key session.' : ''}
-${answers.weaknesses.includes('Endurance') ? '  - Endurance focus: longer easy sessions, minimal stopping, time on feet/water/bike.' : ''}
-${answers.weaknesses.includes('Speed') ? '  - Speed focus: include short sharp intervals in focus sport (hard or flat out zone).' : ''}
-${answers.weaknesses.includes('Strength') ? '  - Strength focus: include gym/strength sessions, don\'t skip even if other sports are busy.' : ''}
-${answers.injuries.trim() ? `  - INJURY CONSTRAINT: "${answers.injuries.trim()}" — avoid or modify sessions that aggravate this. Substitute with compatible sports or reduce load on affected days.` : ''}  - Never schedule back-to-back hard or flat-out sessions
-  - Follow hard sessions with easy or recovery next day
-  - Focus sport gets priority scheduling on best days
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COACHING GUIDELINES (follow if no conflict with hard constraints)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Focus sport gets most sessions and hardest zones
+- Day after a hard session must be easy or recovery
+- Avoid same sport on consecutive days unless required
+${answers.purpose.toLowerCase().match(/race|event|compet|tri|marathon|5k|10k|row/) ? '- Race prep: include at least 1 sport-specific hard session\n' : ''}${answers.weaknesses.includes('Endurance') ? '- Endurance: longer easy sessions, maximise time in aerobic zone\n' : ''}${answers.weaknesses.includes('Speed') ? '- Speed: include short sharp intervals in focus sport (hard/flat out)\n' : ''}${answers.weaknesses.includes('Strength') ? '- Strength: always schedule a strength/gym session\n' : ''}
+INTENSITY ZONES (use exact strings):
+"recovery" = very easy active recovery
+"easy"     = comfortable aerobic, full conversation
+"moderate" = steady/tempo, short sentences
+"hard"     = threshold/intervals, barely speaking
+"flat out" = maximum effort, VO2max/sprint
 
-OUTPUT: Raw JSON array only — no markdown, no explanation.
-Return exactly ${numDays} day objects. Each day has "day", "date", "availableMin", "sessions".
-Each session: { "id": "7chars", "sportId": "...", "zone": "...", "durationMin": N, "startTime": "HH:MM" (optional) }
-Valid sportIds: ${config.sports.map(s => `"${s.id}"`).join(', ')}
-Valid zones: "recovery", "easy", "moderate", "hard", "flat out"
-Do NOT include locked sessions. Do NOT exceed daily availableMin.`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT — raw JSON array only, nothing else
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[{"day":"Mon","date":"${exampleDate}","availableMin":60,"sessions":[{"id":"a1b2c3d","sportId":"${exampleSport}","zone":"easy","durationMin":45}]},...${numDays - 1} more days]
+
+Rules:
+- Exactly ${numDays} elements in the array
+- Valid sportId values: ${config.sports.map(s => `"${s.id}"`).join(', ')}
+- Valid zone values: "recovery", "easy", "moderate", "hard", "flat out"
+- id: unique 7-char alphanumeric string per session
+- startTime: optional "HH:MM", only include if a preferred start time was specified
+- Days with 0min budget OR fully locked days: sessions must be []`
 }
 
 function parseAndValidate(input: unknown[], config: PlanConfig, existingPlan: DayPlan[]): DayPlan[] {
@@ -274,7 +292,7 @@ export async function generatePlanWithAI(
   const prompt = buildPrompt(config, existingPlan, answers, followUpAnswers, followUpQuestions)
 
   const text = await callGroq([
-    { role: 'system', content: 'You are an expert sports coach. Output only raw JSON — no markdown, no explanation.' },
+    { role: 'system', content: 'You are an expert sports coach. Output ONLY a raw JSON array — no markdown, no explanation, no text before or after the [.' },
     { role: 'user', content: prompt },
   ], 0.3)
 

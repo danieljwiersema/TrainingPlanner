@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent } from '@dnd-kit/core'
 import type { DayPlan, Session, PlanWarning, PlanConfig } from '../lib/types'
@@ -50,11 +50,24 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
     setEditing(null)
   }
 
+  const [ignoredWarnings, setIgnoredWarnings] = useState<Set<string>>(new Set())
+  const [warningsOpen, setWarningsOpen] = useState(false)
+  const warningsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (warningsRef.current && !warningsRef.current.contains(e.target as Node)) setWarningsOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
   const totalMin = plan.reduce((sum, d) => sum + d.sessions.reduce((s, sess) => s + sess.durationMin, 0), 0)
   const sessionCount = plan.reduce((sum, d) => sum + d.sessions.length, 0)
   const lockedCount = plan.reduce((sum, d) => sum + d.sessions.filter(s => s.locked).length, 0)
-  const hardWarnings = warnings.filter(w => w.type === 'back-to-back-hard' || w.type === 'same-sport-consecutive')
-  const targetWarnings = warnings.filter(w => w.type === 'target-not-met')
+
+  function warningKey(w: PlanWarning) { return `${w.type}-${w.sportId}-${w.dayIndex}` }
+  const activeWarnings = warnings.filter(w => !ignoredWarnings.has(warningKey(w)))
 
   // Per-sport volume
   const sportVolumes: Record<string, number> = {}
@@ -112,11 +125,40 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
             ))}
           </>
         )}
-        {hardWarnings.length > 0 && (
-          <span className="text-sm text-amber-600 font-medium">⚠️ {hardWarnings.length} scheduling warning{hardWarnings.length > 1 ? 's' : ''}</span>
-        )}
-        {targetWarnings.length > 0 && (
-          <span className="text-sm text-blue-500 font-medium">ℹ️ {targetWarnings.length} target{targetWarnings.length > 1 ? 's' : ''} not fully met</span>
+        {activeWarnings.length > 0 && (
+          <div className="relative" ref={warningsRef}>
+            <button
+              onClick={() => setWarningsOpen(v => !v)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold hover:bg-amber-100 transition-colors"
+            >
+              ⚠️ {activeWarnings.length} warning{activeWarnings.length > 1 ? 's' : ''} {warningsOpen ? '▲' : '▼'}
+            </button>
+            {warningsOpen && (
+              <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-72 max-w-sm">
+                <div className="p-2 space-y-1">
+                  {activeWarnings.map(w => (
+                    <div key={warningKey(w)} className="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 group">
+                      <span className="text-xs mt-0.5 shrink-0">{w.type === 'target-not-met' ? 'ℹ️' : '⚠️'}</span>
+                      <span className="text-xs text-gray-600 flex-1 leading-snug">{w.message}</span>
+                      <button
+                        onClick={() => setIgnoredWarnings(s => new Set([...s, warningKey(w)]))}
+                        className="text-xs text-gray-300 hover:text-gray-500 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Ignore this warning"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                {ignoredWarnings.size > 0 && (
+                  <div className="border-t border-gray-100 px-3 py-1.5">
+                    <button
+                      onClick={() => setIgnoredWarnings(new Set())}
+                      className="text-xs text-gray-400 hover:text-gray-600"
+                    >Show {ignoredWarnings.size} ignored</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         <div className="ml-auto flex items-center gap-2">
@@ -160,21 +202,6 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
           )}
         </div>
       </div>
-
-      {warnings.length > 0 && (
-        <div className="space-y-1">
-          {hardWarnings.map((w, i) => (
-            <div key={i} className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
-              ⚠️ {w.message}
-            </div>
-          ))}
-          {targetWarnings.map((w, i) => (
-            <div key={i} className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700">
-              ℹ️ {w.message}
-            </div>
-          ))}
-        </div>
-      )}
 
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="overflow-x-auto -mx-1 px-1">

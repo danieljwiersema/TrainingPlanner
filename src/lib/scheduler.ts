@@ -1,4 +1,4 @@
-import type { Zone, Session, DayPlan, PlanConfig, WeekIntensity, SportDef, SportTarget } from './types'
+import type { Zone, Session, DayPlan, PlanConfig, SportDef, SportTarget } from './types'
 import { getLabel } from './labelUtils'
 import { isHard } from './validator'
 
@@ -7,20 +7,6 @@ const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 function getDayName(isoDate: string): string {
   const [y, m, d] = isoDate.split('-').map(Number)
   return DAY_SHORT[new Date(y, m - 1, d).getDay()]
-}
-
-const FOCUS_ZONES: Record<WeekIntensity, Zone[]> = {
-  light:    ['easy',     'recovery', 'easy',     'recovery'],
-  moderate: ['moderate', 'easy',     'moderate', 'easy'],
-  hard:     ['hard',     'moderate', 'easy',     'moderate'],
-  peak:     ['flat out', 'hard',     'moderate', 'hard'],
-}
-
-const SECONDARY_ZONES: Record<WeekIntensity, Zone[]> = {
-  light:    ['recovery', 'easy',     'recovery', 'easy'],
-  moderate: ['easy',     'easy',     'moderate', 'easy'],
-  hard:     ['easy',     'moderate', 'easy',     'moderate'],
-  peak:     ['moderate', 'easy',     'moderate', 'hard'],
 }
 
 const ZONE_ORDER: Record<Zone, number> = {
@@ -58,48 +44,66 @@ export function resolveSessionCount(sport: SportDef, target: SportTarget | undef
   const raw = target?.sessionsPerWeek
   if (typeof raw === 'number') return raw
   const cap = SPORT_SESSION_CAP[sport.id] ?? DEFAULT_SESSION_CAP
-  if (target?.minutesPerWeek) return Math.max(1, Math.ceil(target.minutesPerWeek / cap))
+  if (typeof target?.minutesPerWeek === 'number') return Math.max(1, Math.ceil(target.minutesPerWeek / cap))
   const availableDays = dailyMinutes.filter(m => m >= Math.min(cap, 20)).length
   return Math.max(1, Math.min(availableDays, 3))
 }
 
+// Resolve minutes/week for sports set to 'default' — they share the weekly goal minus explicit sports
+function resolveDefaultMinutes(config: PlanConfig): Record<string, number> {
+  const totalAvailable = config.dailyMinutes.reduce((a, b) => a + b, 0)
+  const weeklyGoal = config.weeklyMinuteGoal ?? totalAvailable
+
+  const explicitTotal = config.sports.reduce((sum, s) => {
+    const m = config.targets[s.id]?.minutesPerWeek
+    return sum + (typeof m === 'number' ? m : 0)
+  }, 0)
+
+  const remaining = Math.max(0, weeklyGoal - explicitTotal)
+  const defaultSports = config.sports.filter(s => config.targets[s.id]?.minutesPerWeek === 'default')
+  if (defaultSports.length === 0) return {}
+
+  const totalDefaultSessions = defaultSports.reduce(
+    (sum, s) => sum + resolveSessionCount(s, config.targets[s.id], config.dailyMinutes),
+    0,
+  )
+
+  const result: Record<string, number> = {}
+  for (const sport of defaultSports) {
+    const sessions = resolveSessionCount(sport, config.targets[sport.id], config.dailyMinutes)
+    result[sport.id] = totalDefaultSessions > 0 ? Math.round((sessions / totalDefaultSessions) * remaining) : 0
+  }
+  return result
+}
+
 function buildSlots(config: PlanConfig, lockedCountBySport: Record<string, number>): PlannedSlot[] {
-  const { sports, focus, weekIntensity, targets, dailyMinutes } = config
+  const { sports, focus, targets, dailyMinutes } = config
+  const defaultMinutes = resolveDefaultMinutes(config)
   const focusSport = sports.find(s => s.id === focus)
-  const secondaries = sports.filter(s => s.id !== focus)
   const slots: PlannedSlot[] = []
+
+  function getTargetMin(sport: SportDef, total: number): number | null {
+    const m = targets[sport.id]?.minutesPerWeek
+    if (typeof m === 'number') return Math.round(m / total)
+    if (m === 'default' && defaultMinutes[sport.id]) return Math.round(defaultMinutes[sport.id] / total)
+    return null
+  }
 
   if (focusSport) {
     const t = targets[focus]
-    const sportIntensity = t?.intensity ?? weekIntensity
     const total = resolveSessionCount(focusSport, t, dailyMinutes)
     const n = Math.max(0, total - (lockedCountBySport[focus] ?? 0))
-    const focusZones = FOCUS_ZONES[sportIntensity]
     for (let i = 0; i < n; i++) {
-      slots.push({
-        sport: focusSport,
-        zone: focusZones[Math.min(i, focusZones.length - 1)],
-        targetMin: t?.minutesPerWeek ? Math.round(t.minutesPerWeek / total) : null,
-        isFocus: true,
-        slotIndex: i,
-      })
+      slots.push({ sport: focusSport, zone: 'easy', targetMin: getTargetMin(focusSport, total), isFocus: true, slotIndex: i })
     }
   }
 
-  for (const sport of secondaries) {
+  for (const sport of sports.filter(s => s.id !== focus)) {
     const t = targets[sport.id]
-    const sportIntensity = t?.intensity ?? weekIntensity
     const total = resolveSessionCount(sport, t, dailyMinutes)
     const n = Math.max(0, total - (lockedCountBySport[sport.id] ?? 0))
-    const secZones = SECONDARY_ZONES[sportIntensity]
     for (let i = 0; i < n; i++) {
-      slots.push({
-        sport,
-        zone: secZones[Math.min(i, secZones.length - 1)],
-        targetMin: t?.minutesPerWeek ? Math.round(t.minutesPerWeek / total) : null,
-        isFocus: false,
-        slotIndex: i,
-      })
+      slots.push({ sport, zone: 'easy', targetMin: getTargetMin(sport, total), isFocus: false, slotIndex: i })
     }
   }
 
@@ -124,24 +128,18 @@ function scoreDayForSlot(
   if (avail < 20) return Infinity
 
   let score = 0
-
   score -= Math.min(avail, needed) * 0.3
-
   if (slot.targetMin && avail < slot.targetMin * 0.7) score += 60
-
   if (placed[dayIdx].some(s => s.sportId === slot.sport.id)) score += 200
-
   if (isHard(slot.zone)) {
     if (dayIdx > 0 && placed[dayIdx - 1].some(s => isHard(s.zone))) score += 120
     if (placed[dayIdx].some(s => isHard(s.zone))) score += 300
     if (dayIdx < 6 && placed[dayIdx + 1].some(s => isHard(s.zone))) score += 80
   }
-
   if (slot.sport.id === 'strength') {
     if (dayIdx < 6 && placed[dayIdx + 1].some(s => s.sportId === focus && isHard(s.zone))) score += 90
     if (dayIdx > 0 && placed[dayIdx - 1].some(s => s.sportId === focus && isHard(s.zone))) score += 40
   }
-
   const last = lastDayForSport.get(slot.sport.id)
   if (last !== undefined) {
     const gap = dayIdx - last
@@ -149,9 +147,7 @@ function scoreDayForSlot(
     else if (gap === 1) score += 80
     else if (gap === 2) score += 20
   }
-
   if (placed[dayIdx].length === 0) score -= 8
-
   return score
 }
 
@@ -182,7 +178,6 @@ export function generatePlan(config: PlanConfig, existingPlan?: DayPlan[]): DayP
   const { dailyMinutes, weekStartDate, focus } = config
   const numDays = config.numDays ?? 7
 
-  // Collect locked sessions per day and count per sport
   const lockedByDay: Session[][] = Array.from({ length: numDays }, (_, i) =>
     existingPlan?.[i]?.sessions.filter(s => s.locked) ?? []
   )
@@ -195,15 +190,11 @@ export function generatePlan(config: PlanConfig, existingPlan?: DayPlan[]): DayP
 
   const slots = buildSlots(config, lockedCountBySport)
 
-  // Start remaining time after subtracting locked sessions
   const remaining = Array.from({ length: numDays }, (_, i) =>
     Math.max(0, (dailyMinutes[i] ?? 0) - lockedByDay[i].reduce((sum, s) => sum + s.durationMin, 0))
   )
 
-  // placed starts with locked sessions; new sessions will be appended
   const placed: Session[][] = lockedByDay.map(sessions => [...sessions])
-
-  // Seed lastDayForSport from locked sessions
   const lastDayForSport: Map<string, number> = new Map()
   placed.forEach((sessions, i) => {
     for (const s of sessions) {
@@ -216,7 +207,6 @@ export function generatePlan(config: PlanConfig, existingPlan?: DayPlan[]): DayP
 
   for (const slot of slots) {
     const cap = SPORT_SESSION_CAP[slot.sport.id] ?? DEFAULT_SESSION_CAP
-
     const candidates = Array.from({ length: numDays }, (_, i) => ({
       i,
       score: scoreDayForSlot(i, slot, placed, remaining, lastDayForSport, focus),

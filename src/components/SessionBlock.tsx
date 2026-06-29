@@ -32,9 +32,12 @@ interface Props {
   onSave: (session: Session) => void
   onDelete: () => void
   onToggleLock: () => void
+  designMode?: boolean
+  isSelected?: boolean
+  onSelect?: () => void
 }
 
-export function SessionBlock({ session, sport, config, dayIndex, warnings, onTimeChange, onSave, onDelete, onToggleLock }: Props) {
+export function SessionBlock({ session, sport, config, dayIndex, warnings, onTimeChange, onSave, onDelete, onToggleLock, designMode, isSelected, onSelect }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [zone, setZone] = useState<Zone>(session.zone)
   const [duration, setDuration] = useState(session.durationMin)
@@ -53,7 +56,7 @@ export function SessionBlock({ session, sport, config, dayIndex, warnings, onTim
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: session.id,
     data: { sessionId: session.id, fromDayIndex: dayIndex },
-    disabled: !!session.locked || expanded,
+    disabled: !!session.locked || expanded || !!designMode,
   })
 
   const hasViolation = warnings.some(w =>
@@ -77,6 +80,7 @@ export function SessionBlock({ session, sport, config, dayIndex, warnings, onTim
 
   function handleExpand(e: React.MouseEvent) {
     e.stopPropagation()
+    if (designMode) { onSelect?.(); return }
     if (session.locked) return
     if (expanded) {
       commit(zone, duration, notes, sportId)
@@ -98,7 +102,9 @@ export function SessionBlock({ session, sport, config, dayIndex, warnings, onTim
     <div
       ref={setNodeRef}
       style={style}
-      className={`rounded-xl overflow-hidden shadow-sm border-2 ${
+      className={`rounded-xl overflow-hidden shadow-sm border-2 transition-all ${
+        designMode && isSelected ? 'border-purple-500 ring-2 ring-purple-300' :
+        designMode ? 'border-purple-200 cursor-pointer hover:border-purple-400' :
         session.locked ? 'border-blue-400' : hasViolation ? 'border-amber-400' : 'border-transparent'
       } select-none`}
     >
@@ -112,7 +118,12 @@ export function SessionBlock({ session, sport, config, dayIndex, warnings, onTim
         <span className="text-base">{activeSport?.icon ?? '🏋️'}</span>
         <span className="text-white font-semibold text-sm">{activeSport?.name ?? sportId}</span>
         <div className="ml-auto flex items-center gap-1">
-          {hasViolation && !session.locked && <span className="text-amber-300 text-xs">⚠️</span>}
+          {designMode && (
+            <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-colors ${isSelected ? 'bg-white border-white text-purple-600' : 'border-white/60 text-white/60'}`}>
+              {isSelected ? '✓' : ''}
+            </span>
+          )}
+          {hasViolation && !session.locked && !designMode && <span className="text-amber-300 text-xs">⚠️</span>}
           <button
             onPointerDown={e => e.stopPropagation()}
             onClick={e => { e.stopPropagation(); onToggleLock() }}

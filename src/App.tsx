@@ -3,14 +3,17 @@ import type { PlanConfig, DayPlan, PlanWarning } from './lib/types'
 import { DEFAULT_SPORTS } from './lib/types'
 import { generatePlan, emptyPlan, addDays } from './lib/scheduler'
 import { validatePlan } from './lib/validator'
-import { generatePlanWithAI, evaluateWizardAnswers } from './lib/aiPlanner'
-import type { WizardAnswers, FollowUpQuestion } from './lib/aiPlanner'
+import { optimiseSessions, designSessions } from './lib/aiPlanner'
+import type { CoachAnswers, SessionDesign } from './lib/aiPlanner'
+import { getLabel } from './lib/labelUtils'
+import { SessionDesigner } from './components/SessionDesigner'
 import { AIWizard } from './components/AIWizard'
 import { useGoogleCalendar } from './hooks/useGoogleCalendar'
 import { SetupPanel } from './components/SetupPanel'
 import { WeeklyGrid } from './components/WeeklyGrid'
 import { CalendarView } from './components/CalendarView'
 import { TemplateSelector } from './components/TemplateSelector'
+import { WelcomeModal } from './components/WelcomeModal'
 
 type Tab = 'plan' | 'calendar'
 
@@ -61,26 +64,83 @@ export default function App() {
   const [plan, setPlan] = useState<DayPlan[]>(() => loadSavedPlan(loadSavedConfig()))
   const [warnings, setWarnings] = useState<PlanWarning[]>([])
   const [history, setHistory] = useState<DayPlan[][]>([])
-  const [showTemplates, setShowTemplates] = useState(() => !localStorage.getItem('tplanner-config'))
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('tplanner-config'))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [aiNotice, setAiNotice] = useState<string | null>(null)
   const [showAIWizard, setShowAIWizard] = useState(false)
+  const [sessionDesigns, setSessionDesigns] = useState<SessionDesign[] | null>(null)
+  const [justGenerated, setJustGenerated] = useState(false)
 
-  async function handleAIEvaluate(answers: WizardAnswers) {
-    return evaluateWizardAnswers(config, answers)
-  }
-
-  async function handleAIGenerate(answers: WizardAnswers, followUpAnswers: Record<string, string>, followUpQuestions: FollowUpQuestion[]) {
+  async function handleDesignSessions(selectedIds: string[], injuries?: string) {
     setAiLoading(true)
     setAiError(null)
+    setAiNotice(null)
     try {
-      const result = await generatePlanWithAI(config, plan, answers, followUpAnswers, followUpQuestions)
-      applyPlan(result)
-      setShowAIWizard(false)
+      const designs = await designSessions(config, plan, selectedIds, injuries)
+      // Drop any session the AI returned with no usable options
+      const usable = designs.filter(d => d.options.length > 0)
+      if (usable.length === 0) {
+        setAiError("The AI couldn't design those sessions — please try again.")
+      } else {
+        if (usable.length < designs.length) {
+          setAiNotice(`Designed ${usable.length} of ${designs.length} sessions — the rest came back empty.`)
+        }
+        setSessionDesigns(usable)
+      }
     } catch (e) {
-      setAiError(e instanceof Error ? e.message : 'AI generation failed')
-      setShowAIWizard(false)
+      setAiError(e instanceof Error ? e.message : 'Session design failed')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  function handleApplyDesigns(changes: { id: string; zone: import('./lib/types').Zone; notes: string }[]) {
+    const updated = plan.map(day => ({
+      ...day,
+      sessions: day.sessions.map(session => {
+        const change = changes.find(c => c.id === session.id)
+        if (!change) return session
+        const sport = config.sports.find(s => s.id === session.sportId)
+        return { ...session, zone: change.zone, label: sport ? getLabel(sport, change.zone) : change.zone, notes: change.notes || session.notes }
+      }),
+    }))
+    applyPlan(updated)
+    setSessionDesigns(null)
+  }
+
+  async function handleAIOptimise(answers: CoachAnswers) {
+    setAiLoading(true)
+    setAiError(null)
+    setAiNotice(null)
+    setShowAIWizard(false)
+    setJustGenerated(false)
+    try {
+      const changes = await optimiseSessions(config, plan, answers)
+      let changeCount = 0
+      const updated = plan.map(day => ({
+        ...day,
+        sessions: day.sessions.map(session => {
+          const change = changes.find(c => c.id === session.id)
+          if (!change) return session
+          if (change.zone !== session.zone || (change.notes && change.notes !== session.notes)) changeCount++
+          const sport = config.sports.find(s => s.id === session.sportId)
+          return {
+            ...session,
+            zone: change.zone,
+            label: sport ? getLabel(sport, change.zone) : change.zone,
+            notes: change.notes ?? session.notes,
+          }
+        }),
+      }))
+      applyPlan(updated)
+      setAiNotice(changeCount > 0
+        ? `Updated intensity on ${changeCount} session${changeCount > 1 ? 's' : ''}.`
+        : 'Your plan already matched the AI’s recommendation — no changes needed.')
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'AI optimisation failed')
     } finally {
       setAiLoading(false)
     }
@@ -136,6 +196,7 @@ export default function App() {
 
   function handleGenerate() {
     applyPlan(generatePlan(config, plan))
+    setJustGenerated(true)
   }
 
   function handleConfigChange(next: PlanConfig) {
@@ -144,11 +205,17 @@ export default function App() {
     if (weekChanged) {
       switchWeek(next)
     } else if (numDaysChanged) {
+      const newLen = next.numDays ?? 7
+      // Preserve sessions on days that still exist; only days beyond the new length are dropped
+      const lost = plan.slice(newLen).reduce((n, d) => n + d.sessions.length, 0)
+      if (lost > 0 && !window.confirm(`Shortening to ${newLen} days will remove ${lost} session${lost > 1 ? 's' : ''} on the dropped days. Continue?`)) {
+        return
+      }
+      const merged = emptyPlan(next).map((d, i) => ({ ...d, sessions: plan[i]?.sessions ?? [] }))
+      setHistory(h => [...h.slice(-9), plan])
       setConfig(next)
-      const newPlan = emptyPlan(next)
-      setPlan(newPlan)
-      setWarnings([])
-      setHistory([])
+      setPlan(merged)
+      setWarnings(validatePlan(merged, next))
     } else {
       setConfig(next)
     }
@@ -184,6 +251,7 @@ export default function App() {
     setWarnings([])
     setHistory([])
     setShowTemplates(false)
+    setShowWelcome(false)
   }
 
   return (
@@ -245,7 +313,6 @@ export default function App() {
               config={config}
               onChange={handleConfigChange}
               onShowTemplates={() => setShowTemplates(true)}
-              aiError={aiError}
             />
           </div>
         )}
@@ -260,7 +327,13 @@ export default function App() {
               onGenerate={handleGenerate}
               onRegenerate={() => applyPlan(generatePlan(config, plan))}
               onOpenAIWizard={() => setShowAIWizard(true)}
+              onDesignSessions={handleDesignSessions}
               aiLoading={aiLoading}
+              aiError={aiError}
+              aiNotice={aiNotice}
+              onDismissAiMessage={() => { setAiError(null); setAiNotice(null) }}
+              justGenerated={justGenerated}
+              onDismissNudge={() => setJustGenerated(false)}
               onUndo={undo}
               canUndo={history.length > 0}
               onCopyWeek={copyWeekForward}
@@ -275,9 +348,26 @@ export default function App() {
       {showAIWizard && (
         <AIWizard
           config={config}
-          onEvaluate={handleAIEvaluate}
-          onGenerate={handleAIGenerate}
+          onOptimise={handleAIOptimise}
           onClose={() => setShowAIWizard(false)}
+        />
+      )}
+
+      {sessionDesigns && (
+        <SessionDesigner
+          designs={sessionDesigns}
+          plan={plan}
+          config={config}
+          onApply={handleApplyDesigns}
+          onClose={() => setSessionDesigns(null)}
+        />
+      )}
+
+      {showWelcome && (
+        <WelcomeModal
+          weekStartDate={config.weekStartDate}
+          onSelectTemplate={handleSelectTemplate}
+          onSkip={() => setShowWelcome(false)}
         />
       )}
 

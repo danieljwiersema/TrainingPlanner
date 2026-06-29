@@ -18,7 +18,13 @@ interface Props {
   onGenerate: () => void
   onRegenerate: () => void
   onOpenAIWizard: () => void
+  onDesignSessions: (ids: string[], injuries?: string) => void
   aiLoading: boolean
+  aiError: string | null
+  aiNotice: string | null
+  onDismissAiMessage: () => void
+  justGenerated: boolean
+  onDismissNudge: () => void
   onUndo: () => void
   canUndo: boolean
   onCopyWeek: () => void
@@ -31,10 +37,37 @@ function formatMin(min: number): string {
   return `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ''}`
 }
 
-export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onRegenerate, onOpenAIWizard, aiLoading, onUndo, canUndo, onCopyWeek, gcalEvents }: Props) {
+export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onRegenerate, onOpenAIWizard, onDesignSessions, aiLoading, aiError, aiNotice, onDismissAiMessage, justGenerated, onDismissNudge, onUndo, canUndo, onCopyWeek, gcalEvents }: Props) {
   const [editing, setEditing] = useState<EditTarget | null>(null)
+  const [designMode, setDesignMode] = useState(false)
+  const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set())
+  const [designInjuries, setDesignInjuries] = useState('')
+  const [clearMenuOpen, setClearMenuOpen] = useState(false)
+  const clearMenuRef = useRef<HTMLDivElement>(null)
   const { moveSession, saveSession, updateSession, deleteSession, setSessionTime, toggleLock, clearUnlocked, clearAll } = usePlanEditor(plan, onChange)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  function toggleDesignMode() {
+    setDesignMode(v => !v)
+    setSelectedSessions(new Set())
+  }
+
+  function toggleSelectSession(id: string) {
+    setSelectedSessions(s => {
+      const next = new Set(s)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function confirmDesign() {
+    if (selectedSessions.size === 0) return
+    onDesignSessions([...selectedSessions], designInjuries.trim() || undefined)
+    setDesignMode(false)
+    setSelectedSessions(new Set())
+    setDesignInjuries('')
+  }
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
@@ -57,6 +90,7 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (warningsRef.current && !warningsRef.current.contains(e.target as Node)) setWarningsOpen(false)
+      if (clearMenuRef.current && !clearMenuRef.current.contains(e.target as Node)) setClearMenuOpen(false)
     }
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
@@ -68,6 +102,27 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
 
   function warningKey(w: PlanWarning) { return `${w.type}-${w.sportId}-${w.dayIndex}` }
   const activeWarnings = warnings.filter(w => !ignoredWarnings.has(warningKey(w)))
+
+  // Guards
+  const hasSessions = sessionCount > 0
+  const hasTimeBudget = config.dailyMinutes.some(m => m > 0)
+  const hasTargets = config.sports.some(s => {
+    const t = config.targets[s.id]
+    return t && (t.sessionsPerWeek === 'auto' || (typeof t.sessionsPerWeek === 'number' && t.sessionsPerWeek > 0))
+  })
+  const canGenerate = config.sports.length > 0 && hasTimeBudget && hasTargets
+  const generateBlockedReason = config.sports.length === 0
+    ? 'Add a sport in the setup panel first'
+    : !hasTimeBudget
+      ? 'Set some daily time in the setup panel first'
+      : !hasTargets
+        ? 'Set at least one sport to 1+ sessions/week'
+        : ''
+
+  function handleClearAll() {
+    setClearMenuOpen(false)
+    if (window.confirm('Clear all sessions for this week? You can undo this with ⌘Z.')) clearAll()
+  }
 
   // Per-sport volume
   const sportVolumes: Record<string, number> = {}
@@ -83,17 +138,30 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
       <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={onGenerate}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition-colors"
-        >Generate Plan</button>
+          disabled={!canGenerate}
+          title={canGenerate ? 'Build a schedule from your time budget and targets' : generateBlockedReason}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-200 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-colors"
+        >Generate Schedule</button>
         <button
           onClick={onOpenAIWizard}
-          disabled={aiLoading}
-          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white font-bold rounded-xl text-sm transition-colors flex items-center gap-2"
+          disabled={aiLoading || !hasSessions}
+          title={hasSessions ? 'Assign intensity zones with AI' : 'Generate a schedule first'}
+          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-200 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-colors flex items-center gap-2"
         >
           {aiLoading
-            ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Generating…</>
-            : '✨ AI Generate'}
+            ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Optimising…</>
+            : '✨ Optimise Intensity Distribution'}
         </button>
+        <button
+          onClick={toggleDesignMode}
+          disabled={aiLoading || (!hasSessions && !designMode)}
+          title={hasSessions ? 'Pick sessions for AI to design workout options' : 'Generate a schedule first'}
+          className={`px-4 py-2 font-bold rounded-xl text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            designMode
+              ? 'bg-purple-100 text-purple-700 border-2 border-purple-400'
+              : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-2 border-purple-200'
+          }`}
+        >🎯 Design Sessions</button>
         {sessionCount > 0 && (
           <button
             onClick={onRegenerate}
@@ -102,6 +170,62 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
           >🔄 Regenerate</button>
         )}
       </div>
+
+      {!canGenerate && !hasSessions && (
+        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">⚠️ {generateBlockedReason} before generating a schedule.</p>
+      )}
+
+      {(aiError || aiNotice) && (
+        <div className={`flex items-start gap-2 px-4 py-3 rounded-xl border ${aiError ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+          <span className="text-sm shrink-0">{aiError ? '⚠️' : '✅'}</span>
+          <span className={`text-sm flex-1 leading-snug ${aiError ? 'text-red-700' : 'text-green-700'}`}>{aiError ?? aiNotice}</span>
+          <button onClick={onDismissAiMessage} className={`text-sm leading-none shrink-0 ${aiError ? 'text-red-300 hover:text-red-500' : 'text-green-300 hover:text-green-500'}`}>✕</button>
+        </div>
+      )}
+
+      {justGenerated && !designMode && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-purple-50 border border-purple-200 rounded-xl">
+          <span className="text-sm text-purple-700">
+            ✅ Schedule generated — now use <span className="font-semibold">✨ Optimise Intensity</span> to assign hard/easy zones to your goals.
+          </span>
+          <button onClick={onDismissNudge} className="ml-auto text-purple-300 hover:text-purple-500 text-sm leading-none shrink-0">✕</button>
+        </div>
+      )}
+
+      {designMode && (
+        <div className="px-4 py-3 bg-purple-50 border-2 border-purple-200 rounded-xl space-y-2.5">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-purple-700">
+              {selectedSessions.size === 0
+                ? 'Click sessions to select them for AI design'
+                : `${selectedSessions.size} session${selectedSessions.size > 1 ? 's' : ''} selected`}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={toggleDesignMode} className="text-xs text-purple-400 hover:text-purple-600 font-medium">Cancel</button>
+              {selectedSessions.size > 0 && (
+                <button
+                  onClick={confirmDesign}
+                  disabled={aiLoading}
+                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                >
+                  {aiLoading
+                    ? <><span className="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Designing…</>
+                    : `Design ${selectedSessions.size} session${selectedSessions.size > 1 ? 's' : ''} →`}
+                </button>
+              )}
+            </div>
+          </div>
+          {selectedSessions.size > 0 && (
+            <input
+              type="text"
+              value={designInjuries}
+              onChange={e => setDesignInjuries(e.target.value)}
+              placeholder="Any injuries to work around? (optional) e.g. sore knee — avoid hard running"
+              className="w-full px-3 py-1.5 text-xs border border-purple-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-700 placeholder-gray-300"
+            />
+          )}
+        </div>
+      )}
 
       <div className="flex items-center gap-3 flex-wrap">
         {sessionCount > 0 && (
@@ -176,22 +300,25 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
                 title="Copy all sessions to next week"
                 className="text-xs px-3 py-1.5 rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold"
               >Copy →</button>
-              <div className="relative group">
-                <button className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold">
-                  Clear ▾
-                </button>
-                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden hidden group-hover:block z-10 min-w-36">
-                  {lockedCount > 0 && (
+              <div className="relative" ref={clearMenuRef}>
+                <button
+                  onClick={() => setClearMenuOpen(v => !v)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold"
+                >Clear ▾</button>
+                {clearMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-10 min-w-36">
+                    {lockedCount > 0 && (
+                      <button
+                        onClick={() => { setClearMenuOpen(false); clearUnlocked() }}
+                        className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-gray-50"
+                      >Clear unlocked only</button>
+                    )}
                     <button
-                      onClick={clearUnlocked}
-                      className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-gray-50"
-                    >Clear unlocked only</button>
-                  )}
-                  <button
-                    onClick={clearAll}
-                    className="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50"
-                  >Clear all sessions</button>
-                </div>
+                      onClick={handleClearAll}
+                      className="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50"
+                    >Clear all sessions</button>
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => exportICS(plan, config)}
@@ -202,6 +329,21 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
           )}
         </div>
       </div>
+
+      {sessionCount === 0 && (
+        <div className="flex flex-col items-center justify-center text-center py-12 px-4 border-2 border-dashed border-gray-200 rounded-2xl">
+          <span className="text-4xl mb-3">🗓️</span>
+          <p className="text-base font-semibold text-gray-700">No sessions yet</p>
+          <p className="text-sm text-gray-400 mt-1 mb-5 max-w-xs">Build a week from your time budget and sport targets, then fine-tune the intensity with AI.</p>
+          <button
+            onClick={onGenerate}
+            disabled={!canGenerate}
+            title={canGenerate ? '' : generateBlockedReason}
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-200 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-colors"
+          >Generate Schedule</button>
+          <p className="text-xs text-gray-300 mt-3">{canGenerate ? 'or add sessions manually using the + buttons below' : generateBlockedReason}</p>
+        </div>
+      )}
 
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="overflow-x-auto -mx-1 px-1">
@@ -220,6 +362,9 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
                 onDelete={deleteSession}
                 onTimeChange={setSessionTime}
                 onToggleLock={toggleLock}
+                designMode={designMode}
+                selectedSessionIds={selectedSessions}
+                onSelectSession={toggleSelectSession}
               />
             ))}
           </div>

@@ -58,10 +58,31 @@ function checkTargetsNotMet(plan: DayPlan[], config: PlanConfig): PlanWarning[] 
   return warnings
 }
 
+function checkOrphanSports(plan: DayPlan[], config: PlanConfig): PlanWarning[] {
+  const validIds = new Set(config.sports.map(s => s.id))
+  const seen = new Set<string>()
+  const warnings: PlanWarning[] = []
+  plan.forEach((day, i) => {
+    for (const s of day.sessions) {
+      if (!validIds.has(s.sportId) && !seen.has(s.sportId)) {
+        seen.add(s.sportId)
+        warnings.push({
+          type: 'orphan-sport',
+          sportId: s.sportId,
+          dayIndex: i,
+          message: `A session uses a sport that was removed — reassign it (click the card) or delete it`,
+        })
+      }
+    }
+  })
+  return warnings
+}
+
 export function validatePlan(plan: DayPlan[], config: PlanConfig): PlanWarning[] {
   return [
     ...checkBackToBackHard(plan),
     ...checkSameSportConsecutive(plan, config),
     ...checkTargetsNotMet(plan, config),
+    ...checkOrphanSports(plan, config),
   ]
 }

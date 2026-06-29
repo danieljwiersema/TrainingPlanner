@@ -15,6 +15,9 @@ interface Props {
   onDelete: (sessionId: string) => void
   onTimeChange: (sessionId: string, time: string | undefined) => void
   onToggleLock: (sessionId: string) => void
+  designMode?: boolean
+  selectedSessionIds?: Set<string>
+  onSelectSession?: (sessionId: string) => void
 }
 
 function fmtTime(iso: string): string {
@@ -25,7 +28,7 @@ function fmtTime(iso: string): string {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')}${ampm}`
 }
 
-export function DayColumn({ day, dayIndex, sports, config, warnings, gcalEvents, onAdd, onSaveSession, onDelete, onTimeChange, onToggleLock }: Props) {
+export function DayColumn({ day, dayIndex, sports, config, warnings, gcalEvents, onAdd, onSaveSession, onDelete, onTimeChange, onToggleLock, designMode, selectedSessionIds, onSelectSession }: Props) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-${dayIndex}` })
 
   return (
@@ -85,6 +88,9 @@ export function DayColumn({ day, dayIndex, sports, config, warnings, gcalEvents,
             onSave={onSaveSession}
             onDelete={() => onDelete(session.id)}
             onToggleLock={() => onToggleLock(session.id)}
+            designMode={designMode}
+            isSelected={selectedSessionIds?.has(session.id)}
+            onSelect={() => onSelectSession?.(session.id)}
           />
         ))}
 

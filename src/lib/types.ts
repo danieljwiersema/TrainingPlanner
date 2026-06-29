@@ -10,8 +10,7 @@ export interface SportDef {
 
 export interface SportTarget {
   sessionsPerWeek: number | 'auto'
-  minutesPerWeek?: number
-  intensity?: WeekIntensity  // overrides global weekIntensity for this sport
+  minutesPerWeek?: number | 'default'
 }
 
 export interface Session {
@@ -42,10 +41,11 @@ export interface PlanConfig {
   targets: Record<string, SportTarget>
   preferredStartTimes?: (string | undefined)[]  // "07:30" per day
   numDays?: number  // how many days to schedule (default 7)
+  weeklyMinuteGoal?: number  // total weekly training time target (affects 'default' sport minutes)
 }
 
 export interface PlanWarning {
-  type: 'back-to-back-hard' | 'same-sport-consecutive' | 'target-not-met'
+  type: 'back-to-back-hard' | 'same-sport-consecutive' | 'target-not-met' | 'orphan-sport'
   sportId: string
   message: string
   dayIndex: number

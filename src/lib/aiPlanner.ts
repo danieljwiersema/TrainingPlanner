@@ -2,7 +2,8 @@ import type { DayPlan, PlanConfig, Session, Zone } from './types'
 import { getLabel } from './labelUtils'
 import { emptyPlan } from './scheduler'
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+const GROK_URL = 'https://api.x.ai/v1/chat/completions'
+const GROK_MODEL = 'grok-3-mini'
 
 const VALID_ZONES = new Set<Zone>(['recovery', 'easy', 'moderate', 'hard', 'flat out'])
 
@@ -88,45 +89,52 @@ id must be a unique 7-character alphanumeric string per session.
 startTime is optional — include only if a preferred start time was given for that day.`
 }
 
-function parseAndValidate(text: string, config: PlanConfig, existingPlan: DayPlan[]): DayPlan[] {
-  const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
-  const parsed = JSON.parse(cleaned) as DayPlan[]
+function parseAndValidate(input: string | unknown[], config: PlanConfig, existingPlan: DayPlan[]): DayPlan[] {
+  let parsed: unknown[]
+  if (Array.isArray(input)) {
+    parsed = input
+  } else {
+    const cleaned = input.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
+    parsed = JSON.parse(cleaned) as unknown[]
+  }
 
-  if (!Array.isArray(parsed)) throw new Error('AI returned non-array response')
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('AI returned non-array response')
 
   const numDays = config.numDays ?? 7
   if (parsed.length !== numDays) throw new Error(`Expected ${numDays} days, got ${parsed.length}`)
 
   const validIds = new Set(config.sports.map(s => s.id))
 
-  return parsed.map((day, i) => {
-    if (!day.day || !day.date || !Array.isArray(day.sessions)) {
+  return (parsed as Record<string, unknown>[]).map((day, i) => {
+    if (!day['day'] || !day['date'] || !Array.isArray(day['sessions'])) {
       throw new Error(`Day ${i} missing required fields`)
     }
 
     const lockedSessions = existingPlan[i]?.sessions.filter(s => s.locked) ?? []
 
-    const aiSessions: Session[] = day.sessions
-      .filter(s => s && typeof s.sportId === 'string' && typeof s.zone === 'string')
+    const aiSessions: Session[] = (day['sessions'] as Record<string, unknown>[])
+      .filter(s => s && typeof s['sportId'] === 'string' && typeof s['zone'] === 'string')
       .map(s => {
-        if (!validIds.has(s.sportId)) throw new Error(`Unknown sportId "${s.sportId}"`)
-        if (!VALID_ZONES.has(s.zone as Zone)) throw new Error(`Unknown zone "${s.zone}"`)
-        const sp = config.sports.find(sp => sp.id === s.sportId)
+        const sportId = s['sportId'] as string
+        const zone = s['zone'] as string
+        if (!validIds.has(sportId)) throw new Error(`Unknown sportId "${sportId}"`)
+        if (!VALID_ZONES.has(zone as Zone)) throw new Error(`Unknown zone "${zone}"`)
+        const sp = config.sports.find(sp => sp.id === sportId)
         return {
-          id: (typeof s.id === 'string' && s.id.length >= 4) ? s.id : Math.random().toString(36).slice(2, 9),
-          sportId: s.sportId as string,
-          zone: s.zone as Zone,
-          durationMin: Math.max(15, Math.min(300, Number(s.durationMin) || 30)),
-          label: sp ? getLabel(sp, s.zone as Zone) : (s.zone as string),
-          startTime: typeof s.startTime === 'string' ? s.startTime : undefined,
+          id: (typeof s['id'] === 'string' && (s['id'] as string).length >= 4) ? s['id'] as string : Math.random().toString(36).slice(2, 9),
+          sportId,
+          zone: zone as Zone,
+          durationMin: Math.max(15, Math.min(300, Number(s['durationMin']) || 30)),
+          label: sp ? getLabel(sp, zone as Zone) : zone,
+          startTime: typeof s['startTime'] === 'string' ? s['startTime'] as string : undefined,
           userEdited: false,
         } satisfies Session
       })
 
     return {
-      day: day.day as string,
-      date: day.date as string,
-      availableMin: day.availableMin ?? (config.dailyMinutes[i] ?? 0),
+      day: day['day'] as string,
+      date: day['date'] as string,
+      availableMin: (day['availableMin'] as number | undefined) ?? (config.dailyMinutes[i] ?? 0),
       sessions: [...lockedSessions, ...aiSessions],
     }
   })
@@ -137,37 +145,54 @@ export async function generatePlanWithAI(
   existingPlan: DayPlan[],
   userNote: string,
 ): Promise<DayPlan[]> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string
-  if (!apiKey) throw new Error('Gemini API key not configured — contact the site owner')
-  const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(apiKey)}`, {
+  const apiKey = import.meta.env.VITE_GROK_API_KEY as string
+  if (!apiKey) throw new Error('Grok API key not configured — contact the site owner')
+
+  const res = await fetch(GROK_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: buildPrompt(config, existingPlan, userNote) }] }],
-      generationConfig: {
-        temperature: 0.6,
-        responseMimeType: 'application/json',
-      },
+      model: GROK_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert endurance sports coach. Always respond with valid JSON only — no markdown, no explanation.',
+        },
+        {
+          role: 'user',
+          content: buildPrompt(config, existingPlan, userNote),
+        },
+      ],
+      temperature: 0.4,
+      response_format: { type: 'json_object' },
     }),
   })
 
   if (!res.ok) {
-    if (res.status === 400) throw new Error('Invalid API key — get a free one at aistudio.google.com')
+    if (res.status === 401) throw new Error('Invalid Grok API key — check console.x.ai')
     if (res.status === 429) throw new Error('Rate limit reached — wait a moment and try again')
-    if (res.status === 403) throw new Error('API key does not have access to Gemini — check aistudio.google.com')
+    if (res.status === 402) throw new Error('Grok API quota exceeded — check your xAI billing')
     const body = await res.text()
-    throw new Error(`Gemini error ${res.status}: ${body.slice(0, 120)}`)
+    throw new Error(`Grok error ${res.status}: ${body.slice(0, 120)}`)
   }
 
   const data = await res.json() as {
-    candidates?: { content: { parts: { text: string }[] } }[]
+    choices?: { message: { content: string } }[]
     error?: { message: string }
   }
 
   if (data.error) throw new Error(data.error.message)
 
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  const text = data.choices?.[0]?.message?.content
   if (!text) throw new Error('Empty response from AI')
 
-  return parseAndValidate(text, config, existingPlan)
+  // Grok with response_format:json_object returns a wrapped object — unwrap if needed
+  const parsed = JSON.parse(text)
+  const planArray = Array.isArray(parsed) ? parsed : (parsed.plan ?? parsed.days ?? parsed.schedule ?? Object.values(parsed)[0])
+  if (!Array.isArray(planArray)) throw new Error('AI returned unexpected JSON shape')
+
+  return parseAndValidate(planArray as unknown[], config, existingPlan)
 }

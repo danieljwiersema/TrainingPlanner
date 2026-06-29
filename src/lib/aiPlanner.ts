@@ -9,7 +9,9 @@ const VALID_ZONES = new Set<Zone>(['recovery', 'easy', 'moderate', 'hard', 'flat
 
 function buildPrompt(config: PlanConfig, existingPlan: DayPlan[], userNote: string): string {
   const numDays = config.numDays ?? 7
-  const days = existingPlan.length === numDays ? existingPlan : emptyPlan(config)
+  // Always use existingPlan for locked session context; fall back to emptyPlan for structure only
+  const baseDays = emptyPlan(config)
+  const days = baseDays.map((base, i) => existingPlan[i] ? { ...base, sessions: existingPlan[i].sessions } : base)
   const focusSport = config.sports.find(s => s.id === config.focus)
 
   const sportLines = config.sports.map(sport => {
@@ -21,72 +23,101 @@ function buildPrompt(config: PlanConfig, existingPlan: DayPlan[], userNote: stri
     return `  - ${sport.name} (id: "${sport.id}"): ${sess} sessions/week${mins}${intens}`
   }).filter(Boolean).join('\n')
 
+  // Per-day summary: total budget, locked time already used, remaining for AI to fill
   const dayLines = days.map((day, i) => {
     const pref = config.preferredStartTimes?.[i]
-    return `  - ${day.day} ${day.date}: ${day.availableMin}min${pref ? ` (start ${pref})` : ''}${day.availableMin === 0 ? ' — REST DAY, no sessions' : ''}`
+    const locked = day.sessions.filter(s => s.locked)
+    const lockedMin = locked.reduce((sum, s) => sum + s.durationMin, 0)
+    const remaining = Math.max(0, day.availableMin - lockedMin)
+
+    if (day.availableMin === 0) return `  - ${day.day} ${day.date}: REST DAY — leave sessions empty`
+
+    const lockedSummary = locked.length > 0
+      ? ` | ${locked.map(s => {
+          const sp = config.sports.find(sp => sp.id === s.sportId)
+          return `${sp?.name ?? s.sportId} ${s.durationMin}min [LOCKED]`
+        }).join(', ')} | ${remaining}min remaining for new sessions`
+      : ` | ${day.availableMin}min available`
+
+    return `  - ${day.day} ${day.date}${pref ? ` (preferred start ${pref})` : ''}${lockedSummary}`
   }).join('\n')
 
-  const lockedLines = days.flatMap(day =>
-    day.sessions.filter(s => s.locked).map(s => {
+  // Locked sessions listed explicitly so the AI knows exactly what to include
+  const lockedSections = days.map(day => {
+    const locked = day.sessions.filter(s => s.locked)
+    if (locked.length === 0) return null
+    return locked.map(s => {
       const sp = config.sports.find(sp => sp.id === s.sportId)
-      return `  - ${day.day} ${day.date}: ${sp?.name ?? s.sportId}, ${s.zone}, ${s.durationMin}min${s.startTime ? ` at ${s.startTime}` : ''} [LOCKED — keep exactly]`
-    })
-  )
+      return `  - ${day.day} ${day.date}: sportId="${s.sportId}" (${sp?.name ?? s.sportId}), zone="${s.zone}", durationMin=${s.durationMin}${s.startTime ? `, startTime="${s.startTime}"` : ''} ← INCLUDE THIS EXACTLY`
+    }).join('\n')
+  }).filter(Boolean)
+
+  // Previous (non-locked) sessions give the AI context on what's already been done
+  const existingSections = days.map(day => {
+    const unlocked = day.sessions.filter(s => !s.locked)
+    if (unlocked.length === 0) return null
+    return unlocked.map(s => {
+      const sp = config.sports.find(sp => sp.id === s.sportId)
+      return `  - ${day.day} ${day.date}: ${sp?.name ?? s.sportId}, ${s.zone}, ${s.durationMin}min (can replace or keep)`
+    }).join('\n')
+  }).filter(Boolean)
 
   return `You are an expert endurance sports coach. Generate an optimal weekly training plan as JSON.
 
-WEEK: ${numDays} days starting ${config.weekStartDate}
-FOCUS SPORT: ${focusSport?.name ?? config.focus} (give this sport harder zones and more volume)
-DEFAULT INTENSITY: ${config.weekIntensity}
+ATHLETE CONFIG:
+  Week: ${numDays} days starting ${config.weekStartDate}
+  Focus sport: ${focusSport?.name ?? config.focus} — prioritise this sport with more volume and harder zones
+  Overall intensity: ${config.weekIntensity}
 
-SPORTS & TARGETS:
+SPORTS & SESSION TARGETS:
 ${sportLines}
 
-DAILY TIME BUDGETS:
+DAILY SCHEDULE (budget = total available, remaining = what's left after locked sessions):
 ${dayLines}
 
-INTENSITY ZONES (use these exact strings):
-  - "recovery": Very easy, active recovery only
-  - "easy": Comfortable aerobic, can hold full conversation
-  - "moderate": Steady/tempo, short sentences only
-  - "hard": Threshold or interval work, few words
-  - "flat out": Maximum effort, VO2max or sprint
+${lockedSections.length > 0 ? `LOCKED SESSIONS — you MUST include these exactly as shown, do not modify or omit them:
+${lockedSections.join('\n')}
 
-${lockedLines.length > 0 ? `LOCKED SESSIONS (include these exactly as given):\n${lockedLines.join('\n')}\n` : ''}ATHLETE NOTE: "${userNote || 'none'}"
+` : ''}${existingSections.length > 0 ? `EXISTING (UNLOCKED) SESSIONS — for context only, you may replace or keep these:
+${existingSections.join('\n')}
 
-COACHING RULES (soft guidelines, not rigid):
-1. Avoid back-to-back hard/flat-out sessions across all sports
-2. Don't repeat same sport on consecutive days unless unavoidable
-3. Total session time on a day should not exceed its availableMin budget
-4. Focus sport gets harder zones; secondary sports complement it
-5. Follow hard sessions with recovery or easy sessions next day
-6. Rest days (0min) must have empty sessions array
-7. Respect session count targets per sport where possible
+` : ''}INTENSITY ZONES — use these exact strings only:
+  "recovery"  → Very easy, active recovery, very low heart rate
+  "easy"      → Comfortable aerobic, can hold full conversation
+  "moderate"  → Steady/tempo effort, short sentences only
+  "hard"      → Threshold or interval work, barely any words
+  "flat out"  → Maximum effort, VO2max or sprint
 
-Return ONLY a valid JSON array — no markdown, no explanation, nothing else.
+COACHING RULES:
+  1. Never schedule back-to-back hard or flat-out sessions (across all sports)
+  2. Avoid same sport on consecutive days unless targets require it
+  3. New sessions on a day must fit within the remaining time budget shown above
+  4. Focus sport gets harder zones; other sports fill complementary roles
+  5. Always follow a hard day with easy or recovery next day
+  6. Match session counts to targets where possible
+  7. Rest days must have an empty sessions array
 
-Schema (exactly ${numDays} elements):
+ATHLETE NOTE: "${userNote || 'none'}"
+
+Return ONLY a valid JSON array with exactly ${numDays} day objects — no markdown, no explanation.
+
 [
   {
     "day": "Mon",
     "date": "YYYY-MM-DD",
     "availableMin": 60,
     "sessions": [
-      {
-        "id": "abc1234",
-        "sportId": "run",
-        "zone": "easy",
-        "durationMin": 45,
-        "startTime": "07:00"
-      }
+      { "id": "abc1234", "sportId": "run", "zone": "easy", "durationMin": 45, "startTime": "07:00" }
     ]
   }
 ]
 
-Valid sportId values: ${config.sports.map(s => `"${s.id}"`).join(', ')}
-Valid zone values: "recovery", "easy", "moderate", "hard", "flat out"
-id must be a unique 7-character alphanumeric string per session.
-startTime is optional — include only if a preferred start time was given for that day.`
+Rules:
+- Valid sportId values: ${config.sports.map(s => `"${s.id}"`).join(', ')}
+- Valid zone values: "recovery", "easy", "moderate", "hard", "flat out"
+- id: unique 7-char alphanumeric string per session
+- startTime: optional, only include if a preferred start time applies
+- Include ALL sessions in the array for each day — both locked and new ones`
 }
 
 function parseAndValidate(input: string | unknown[], config: PlanConfig, existingPlan: DayPlan[]): DayPlan[] {

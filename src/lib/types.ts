@@ -6,6 +6,7 @@ export interface SportDef {
   name: string
   icon: string
   color: string
+  kind?: 'endurance' | 'strength'  // affects zone language & AI prompting; defaults to endurance
 }
 
 export interface SportTarget {
@@ -52,8 +53,8 @@ export interface PlanWarning {
 }
 
 export const DEFAULT_SPORTS: SportDef[] = [
-  { id: 'swim',     name: 'Swim',     icon: '🏊', color: '#3b82f6' },
-  { id: 'bike',     name: 'Bike',     icon: '🚴', color: '#eab308' },
-  { id: 'run',      name: 'Run',      icon: '🏃', color: '#22c55e' },
-  { id: 'strength', name: 'Strength', icon: '💪', color: '#a855f7' },
+  { id: 'swim',     name: 'Swim',     icon: '🏊', color: '#3b82f6', kind: 'endurance' },
+  { id: 'bike',     name: 'Bike',     icon: '🚴', color: '#eab308', kind: 'endurance' },
+  { id: 'run',      name: 'Run',      icon: '🏃', color: '#22c55e', kind: 'endurance' },
+  { id: 'strength', name: 'Strength', icon: '💪', color: '#a855f7', kind: 'strength' },
 ]

@@ -254,6 +254,18 @@ export default function App() {
     setShowWelcome(false)
   }
 
+  // Express path — apply a template AND immediately fill the week
+  function handleQuickPlan(templateConfig: PlanConfig) {
+    const generated = generatePlan(templateConfig, emptyPlan(templateConfig))
+    setConfig(templateConfig)
+    setPlan(generated)
+    setWarnings(validatePlan(generated, templateConfig))
+    setHistory([])
+    setShowTemplates(false)
+    setShowWelcome(false)
+    setJustGenerated(true)
+  }
+
   return (
     <div className="h-screen flex flex-col bg-gray-50 font-sans">
       <header className="bg-white border-b border-gray-100 px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
@@ -367,6 +379,7 @@ export default function App() {
         <WelcomeModal
           weekStartDate={config.weekStartDate}
           onSelectTemplate={handleSelectTemplate}
+          onQuickPlan={handleQuickPlan}
           onSkip={() => setShowWelcome(false)}
         />
       )}

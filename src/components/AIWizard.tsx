@@ -142,23 +142,25 @@ export function AIWizard({ config, onOptimise, onClose }: Props) {
 
           {step === 'tolerance' && (
             <div className="space-y-3">
-              {([1, 2, 3, 'max'] as const).map(val => (
+              {(['auto', 1, 2, 3, 'max'] as const).map(val => (
                 <button
                   key={String(val)}
                   onClick={() => setHardTolerance(val)}
                   className={`w-full p-3.5 rounded-xl border-2 text-left transition-colors ${hardTolerance === val ? 'bg-purple-50 border-purple-400' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'}`}
                 >
                   <p className="text-sm font-semibold text-gray-800">
-                    {val === 1 ? '1 hard session' : val === 2 ? '2 hard sessions' : val === 3 ? '3 hard sessions' : 'As many as possible'}
+                    {val === 'auto' ? "Not sure — let the AI decide" : val === 1 ? '1 hard session' : val === 2 ? '2 hard sessions' : val === 3 ? '3 hard sessions' : 'As many as possible'}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {val === 1
-                      ? 'One key quality effort. Good for base building or high fatigue weeks.'
-                      : val === 2
-                        ? 'Two quality sessions — classic polarised approach. Suitable for most training phases.'
-                        : val === 3
-                          ? 'Three hard sessions — high stimulus. Only if well rested and in a peak block.'
-                          : 'AI decides how hard to push based on your sessions and goal.'}
+                    {val === 'auto'
+                      ? 'Recommended if you’re unsure — the AI picks a sensible, conservative amount for your level and goal.'
+                      : val === 1
+                        ? 'One key quality effort. Good for base building or high fatigue weeks.'
+                        : val === 2
+                          ? 'Two quality sessions — classic polarised approach. Suitable for most training phases.'
+                          : val === 3
+                            ? 'Three hard sessions — high stimulus. Only if well rested and in a peak block.'
+                            : 'AI decides how hard to push based on your sessions and goal.'}
                   </p>
                 </button>
               ))}

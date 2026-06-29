@@ -64,9 +64,9 @@ export function SetupPanel({ config, onChange, onShowTemplates }: Props) {
     })
   }
 
-  function addSport(name: string, icon: string, color: string) {
+  function addSport(name: string, icon: string, color: string, kind: 'endurance' | 'strength') {
     const id = name.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now()
-    const sport: SportDef = { id, name, icon, color }
+    const sport: SportDef = { id, name, icon, color, kind }
     onChange({
       ...config,
       sports: [...config.sports, sport],

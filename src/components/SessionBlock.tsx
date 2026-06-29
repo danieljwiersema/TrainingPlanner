@@ -3,6 +3,7 @@ import { useDraggable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import type { Session, PlanWarning, SportDef, Zone, PlanConfig } from '../lib/types'
 import { getLabel } from '../lib/labelUtils'
+import { sportKind, zoneShort, zoneDescription } from '../lib/zoneInfo'
 
 const ZONES: Zone[] = ['recovery', 'easy', 'moderate', 'hard', 'flat out']
 
@@ -95,6 +96,7 @@ export function SessionBlock({ session, sport, config, dayIndex, warnings, onTim
     opacity: isDragging ? 0.4 : 1,
   }
 
+  const kind = sportKind(activeSport)
   const displayLabel = activeSport ? getLabel(activeSport, zone) : zone
   const fmtDur = (m: number) => m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`
 
@@ -149,7 +151,7 @@ export function SessionBlock({ session, sport, config, dayIndex, warnings, onTim
 
         {!expanded && (
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${ZONE_BADGE[zone]}`}>{zone}</span>
+            <span title={zoneDescription(zone, kind)} className={`text-xs px-2 py-0.5 rounded-full font-medium ${ZONE_BADGE[zone]}`}>{zoneShort(zone, kind)}</span>
             <span className="text-xs text-gray-500">{fmtDur(duration)}</span>
             {session.locked && <span className="text-xs text-blue-500 font-medium">locked</span>}
             {notes && <span className="text-xs text-gray-400 truncate max-w-[120px]">{notes}</span>}
@@ -183,17 +185,18 @@ export function SessionBlock({ session, sport, config, dayIndex, warnings, onTim
 
             {/* Zone selector */}
             <div>
-              <p className="text-xs text-gray-400 mb-1.5">Zone</p>
+              <p className="text-xs text-gray-400 mb-1.5">Intensity</p>
               <div className="flex flex-wrap gap-1">
                 {ZONES.map(z => (
                   <button
                     key={z}
                     onPointerDown={e => e.stopPropagation()}
                     onClick={e => { e.stopPropagation(); setZone(z) }}
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize border transition-colors ${
+                    title={zoneDescription(z, kind)}
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
                       zone === z ? ZONE_ACTIVE[z] + ' border-2' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
                     }`}
-                  >{z}</button>
+                  >{zoneShort(z, kind)}</button>
                 ))}
               </div>
             </div>

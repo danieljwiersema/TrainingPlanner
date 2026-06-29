@@ -20,7 +20,7 @@ const VALID_ZONES = new Set<Zone>(['recovery', 'easy', 'moderate', 'hard', 'flat
 export interface CoachAnswers {
   mode: 'intensity' | 'design'
   goal: string
-  hardTolerance: 1 | 2 | 3 | 'max'
+  hardTolerance: 1 | 2 | 3 | 'max' | 'auto'
   hardSports: string[]   // sportIds that should receive hard sessions
   weaknesses: string[]
   injuries?: string
@@ -73,9 +73,11 @@ function buildOptimisePrompt(config: PlanConfig, plan: DayPlan[], answers: Coach
     .filter(Boolean)
     .join(', ')
 
-  const toleranceLabel = answers.hardTolerance === 'max'
-    ? 'as many hard sessions as the week can support'
-    : `exactly ${answers.hardTolerance} hard or flat-out session${answers.hardTolerance > 1 ? 's' : ''} across the whole week`
+  const toleranceLabel = answers.hardTolerance === 'auto'
+    ? "you decide the appropriate number of hard sessions for this athlete's level and goal (be conservative — when unsure, fewer is safer)"
+    : answers.hardTolerance === 'max'
+      ? 'as many hard sessions as the week can support'
+      : `exactly ${answers.hardTolerance} hard or flat-out session${answers.hardTolerance > 1 ? 's' : ''} across the whole week`
 
   // Editable sessions (unlocked) vs locked sessions (read-only context)
   const editableLines: string[] = []
@@ -92,6 +94,11 @@ function buildOptimisePrompt(config: PlanConfig, plan: DayPlan[], answers: Coach
   const designMode = answers.mode === 'design'
   const injuriesLine = answers.injuries?.trim()
     ? `\nINJURIES / LIMITATIONS (HARD CONSTRAINT): ${answers.injuries.trim()} — never prescribe intensity that could aggravate this.`
+    : ''
+
+  const strengthSports = config.sports.filter(s => s.kind === 'strength')
+  const strengthNote = strengthSports.length
+    ? `\nSTRENGTH SPORTS (${strengthSports.map(s => s.name).join(', ')}): treat intensity as LOAD / RPE, not heart-rate. Map zones → recovery=mobility, easy=technique (RPE 4-5), moderate=working sets (RPE 6-7), hard=heavy (RPE 8-9), flat out=max/PR (RPE 10). Write notes as sets×reps with %1RM or RPE, e.g. "5×5 back squat @ 80% 1RM, 3min rest".`
     : ''
 
   return `You are an expert endurance and multisport coach. Your task is to assign intensity zones${designMode ? ' and write specific workout notes' : ''} for each session in an athlete's weekly training plan.
@@ -122,7 +129,7 @@ INTENSITY ZONES (use exact strings)
 "moderate" — steady/tempo effort, short sentences, HR zone 3
 "hard"     — threshold/intervals, barely speaking, HR zone 4
 "flat out" — maximum effort, VO2max or sprint, HR zone 5
-
+${strengthNote}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EDITABLE SESSIONS — assign zones to these
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -197,6 +204,9 @@ INTENSITY ZONES:
 "moderate" — zone 3, steady/tempo, short sentences
 "hard"     — zone 4, threshold/intervals, barely speaking
 "flat out" — zone 5, VO2max or sprint
+${config.sports.some(s => s.kind === 'strength')
+  ? 'For strength sports, treat intensity as LOAD/RPE not heart-rate (easy=technique RPE4-5, moderate=working RPE6-7, hard=heavy RPE8-9, flat out=max RPE10) and write notes as sets×reps with %1RM or RPE.'
+  : ''}
 
 OUTPUT: raw JSON only
 {

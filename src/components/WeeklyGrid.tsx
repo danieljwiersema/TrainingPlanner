@@ -7,6 +7,8 @@ import { DayColumn } from './DayColumn'
 import { SessionEditor } from './SessionEditor'
 import { exportICS } from '../lib/calendar'
 import { usePlanEditor } from '../hooks/usePlanEditor'
+import { ZoneLegend } from './ZoneLegend'
+import { isHard } from '../lib/validator'
 
 interface EditTarget { dayIndex: number }
 
@@ -132,6 +134,18 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
     )
   }
 
+  const hasStrength = config.sports.some(s => s.kind === 'strength')
+
+  // Quick balance read for the post-generate nudge
+  const hardDays = plan.filter(d => d.sessions.some(s => isHard(s.zone))).length
+  const restDays = plan.filter(d => d.availableMin > 0 && d.sessions.length === 0).length
+  const backToBack = warnings.some(w => w.type === 'back-to-back-hard')
+  const balanceSummary = backToBack
+    ? 'Looks intense — some hard days are back-to-back. Check the warnings.'
+    : hardDays === 0
+      ? 'All easy so far — use ✨ Optimise Intensity to add hard sessions to your goals.'
+      : `Looks balanced ✓ — ${hardDays} hard day${hardDays > 1 ? 's' : ''}${restDays > 0 ? `, ${restDays} rest day${restDays > 1 ? 's' : ''}` : ''}.`
+
   return (
     <div className="flex flex-col gap-4 h-full">
       {/* Generate buttons — top of screen */}
@@ -186,7 +200,7 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
       {justGenerated && !designMode && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-purple-50 border border-purple-200 rounded-xl">
           <span className="text-sm text-purple-700">
-            ✅ Schedule generated — now use <span className="font-semibold">✨ Optimise Intensity</span> to assign hard/easy zones to your goals.
+            {balanceSummary} {hardDays > 0 && <>Fine-tune with <span className="font-semibold">✨ Optimise Intensity</span>.</>}
           </span>
           <button onClick={onDismissNudge} className="ml-auto text-purple-300 hover:text-purple-500 text-sm leading-none shrink-0">✕</button>
         </div>
@@ -247,6 +261,8 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
                 <span className="font-semibold text-gray-700">{formatMin(sportVolumes[s.id])}</span>
               </span>
             ))}
+            <span className="text-gray-200 hidden sm:inline">|</span>
+            <ZoneLegend hasStrength={hasStrength} />
           </>
         )}
         {activeWarnings.length > 0 && (

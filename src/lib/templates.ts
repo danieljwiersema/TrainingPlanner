@@ -3,6 +3,10 @@ import { DEFAULT_SPORTS } from './types'
 
 const [swim, bike, run, strength] = DEFAULT_SPORTS
 
+const hiit: PlanConfig['sports'][number]  = { id: 'hiit', name: 'HIIT', icon: '🤸', color: '#ef4444', kind: 'strength' }
+const yoga: PlanConfig['sports'][number]  = { id: 'yoga', name: 'Yoga', icon: '🧘', color: '#14b8a6', kind: 'endurance' }
+const cardio: PlanConfig['sports'][number] = { id: 'cardio', name: 'Cardio', icon: '🏃', color: '#22c55e', kind: 'endurance' }
+
 export interface Template {
   id: string
   name: string
@@ -83,13 +87,45 @@ export const TEMPLATES: Template[] = [
     description: 'Strength focus with cardio',
     icon: '💪',
     config: {
-      sports: [strength, run],
+      sports: [strength, cardio],
       focus: 'strength',
       weekIntensity: 'moderate',
       dailyMinutes: [60, 60, 0, 60, 60, 90, 0],
       targets: {
         strength: { sessionsPerWeek: 4 },
-        run:      { sessionsPerWeek: 2 },
+        cardio:   { sessionsPerWeek: 2 },
+      },
+    },
+  },
+  {
+    id: 'hiit',
+    name: 'HIIT / Conditioning',
+    description: 'High-intensity intervals & strength',
+    icon: '🤸',
+    config: {
+      sports: [hiit, strength],
+      focus: 'hiit',
+      weekIntensity: 'hard',
+      dailyMinutes: [45, 45, 0, 45, 45, 60, 0],
+      targets: {
+        hiit:     { sessionsPerWeek: 3 },
+        strength: { sessionsPerWeek: 2 },
+      },
+    },
+  },
+  {
+    id: 'yoga-mobility',
+    name: 'Yoga & Mobility',
+    description: 'Flexibility, recovery & light strength',
+    icon: '🧘',
+    config: {
+      sports: [yoga, strength],
+      focus: 'yoga',
+      weekIntensity: 'light',
+      dailyMinutes: [45, 30, 45, 30, 45, 60, 30],
+      targets: {
+        yoga:     { sessionsPerWeek: 4 },
+        strength: { sessionsPerWeek: 2 },
       },
     },
   },

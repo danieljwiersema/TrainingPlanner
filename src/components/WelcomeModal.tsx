@@ -5,6 +5,7 @@ import { TEMPLATES } from '../lib/templates'
 interface Props {
   weekStartDate: string
   onSelectTemplate: (config: PlanConfig) => void
+  onQuickPlan: (config: PlanConfig) => void
   onSkip: () => void
 }
 
@@ -21,8 +22,9 @@ const STEPS = [
   },
 ]
 
-export function WelcomeModal({ weekStartDate, onSelectTemplate, onSkip }: Props) {
+export function WelcomeModal({ weekStartDate, onSelectTemplate, onQuickPlan, onSkip }: Props) {
   const [screen, setScreen] = useState(0)
+  const [quick, setQuick] = useState(false)
   const onIntro = screen < STEPS.length
 
   return (
@@ -48,18 +50,22 @@ export function WelcomeModal({ weekStartDate, onSelectTemplate, onSkip }: Props)
                 className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition-colors"
               >{screen === STEPS.length - 1 ? 'Choose a sport →' : 'Next →'}</button>
             </div>
+            <button
+              onClick={() => { setQuick(true); setScreen(STEPS.length) }}
+              className="mt-4 text-xs text-blue-500 hover:text-blue-700 font-semibold"
+            >⚡ Just make me a plan — skip the setup</button>
           </div>
         ) : (
           <div className="px-6 py-6 space-y-4">
             <div>
-              <h2 className="font-bold text-gray-900 text-lg">What are you training for?</h2>
-              <p className="text-sm text-gray-400 mt-0.5">Pick a starting point — you can change everything after.</p>
+              <h2 className="font-bold text-gray-900 text-lg">{quick ? 'Pick what you do' : 'What are you training for?'}</h2>
+              <p className="text-sm text-gray-400 mt-0.5">{quick ? "I'll build and fill the whole week for you — tweak anything after." : 'Pick a starting point — you can change everything after.'}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               {TEMPLATES.map(t => (
                 <button
                   key={t.id}
-                  onClick={() => onSelectTemplate({ ...t.config, weekStartDate })}
+                  onClick={() => (quick ? onQuickPlan : onSelectTemplate)({ ...t.config, weekStartDate })}
                   className="p-4 rounded-xl border-2 border-gray-100 hover:border-blue-300 hover:bg-blue-50 text-left transition-colors space-y-1"
                 >
                   <span className="text-2xl block">{t.icon}</span>
@@ -69,7 +75,7 @@ export function WelcomeModal({ weekStartDate, onSelectTemplate, onSkip }: Props)
               ))}
             </div>
             <div className="flex items-center justify-between pt-1">
-              <button onClick={() => setScreen(STEPS.length - 1)} className="text-sm text-gray-400 hover:text-gray-600 font-medium">← Back</button>
+              <button onClick={() => { setQuick(false); setScreen(STEPS.length - 1) }} className="text-sm text-gray-400 hover:text-gray-600 font-medium">← Back</button>
               <button onClick={onSkip} className="text-sm text-gray-400 hover:text-gray-600 font-medium">Skip — set up manually</button>
             </div>
           </div>

@@ -8,7 +8,7 @@ import { SessionEditor } from './SessionEditor'
 import { exportICS } from '../lib/calendar'
 import { usePlanEditor } from '../hooks/usePlanEditor'
 
-interface EditTarget { dayIndex: number; sessionId?: string }
+interface EditTarget { dayIndex: number }
 
 interface Props {
   plan: DayPlan[]
@@ -30,7 +30,7 @@ function formatMin(min: number): string {
 
 export function WeeklyGrid({ plan, warnings, config, onChange, onRegenerate, onUndo, canUndo, onCopyWeek, gcalEvents }: Props) {
   const [editing, setEditing] = useState<EditTarget | null>(null)
-  const { moveSession, saveSession, deleteSession, setSessionTime, toggleLock, clearUnlocked, clearAll } = usePlanEditor(plan, onChange)
+  const { moveSession, saveSession, updateSession, deleteSession, setSessionTime, toggleLock, clearUnlocked, clearAll } = usePlanEditor(plan, onChange)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   function handleDragEnd(event: DragEndEvent) {
@@ -52,8 +52,6 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onRegenerate, onU
   const lockedCount = plan.reduce((sum, d) => sum + d.sessions.filter(s => s.locked).length, 0)
   const hardWarnings = warnings.filter(w => w.type === 'back-to-back-hard' || w.type === 'same-sport-consecutive')
   const targetWarnings = warnings.filter(w => w.type === 'target-not-met')
-  const editingDay = editing ? plan[editing.dayIndex] : null
-  const editingSession = editing?.sessionId ? editingDay?.sessions.find(s => s.id === editing.sessionId) ?? null : null
 
   // Per-sport volume
   const sportVolumes: Record<string, number> = {}
@@ -165,10 +163,11 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onRegenerate, onU
                 day={day}
                 dayIndex={i}
                 sports={config.sports}
+                config={config}
                 warnings={warnings}
                 gcalEvents={gcalEvents.filter(e => (e.start ?? '').startsWith(day.date))}
                 onAdd={() => setEditing({ dayIndex: i })}
-                onEdit={sessionId => setEditing({ dayIndex: i, sessionId })}
+                onSaveSession={updateSession}
                 onDelete={deleteSession}
                 onTimeChange={setSessionTime}
                 onToggleLock={toggleLock}
@@ -180,7 +179,7 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onRegenerate, onU
 
       {editing && (
         <SessionEditor
-          session={editingSession}
+          session={null}
           dayName={plan[editing.dayIndex].day}
           config={config}
           onSave={s => handleSaveSession(editing.dayIndex, s)}

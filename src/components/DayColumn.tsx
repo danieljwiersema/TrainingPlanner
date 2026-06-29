@@ -1,5 +1,5 @@
 import { useDroppable } from '@dnd-kit/core'
-import type { DayPlan, PlanWarning, SportDef } from '../lib/types'
+import type { DayPlan, PlanWarning, SportDef, Session, PlanConfig } from '../lib/types'
 import type { GCalEvent } from '../lib/googleAuth'
 import { SessionBlock } from './SessionBlock'
 
@@ -7,10 +7,11 @@ interface Props {
   day: DayPlan
   dayIndex: number
   sports: SportDef[]
+  config: PlanConfig
   warnings: PlanWarning[]
   gcalEvents: GCalEvent[]
   onAdd: () => void
-  onEdit: (sessionId: string) => void
+  onSaveSession: (session: Session) => void
   onDelete: (sessionId: string) => void
   onTimeChange: (sessionId: string, time: string | undefined) => void
   onToggleLock: (sessionId: string) => void
@@ -24,7 +25,7 @@ function fmtTime(iso: string): string {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')}${ampm}`
 }
 
-export function DayColumn({ day, dayIndex, sports, warnings, gcalEvents, onAdd, onEdit, onDelete, onTimeChange, onToggleLock }: Props) {
+export function DayColumn({ day, dayIndex, sports, config, warnings, gcalEvents, onAdd, onSaveSession, onDelete, onTimeChange, onToggleLock }: Props) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-${dayIndex}` })
 
   return (
@@ -77,11 +78,11 @@ export function DayColumn({ day, dayIndex, sports, warnings, gcalEvents, onAdd, 
             key={session.id}
             session={session}
             sport={sports.find(s => s.id === session.sportId)}
+            config={config}
             dayIndex={dayIndex}
-            isoDate={day.date}
             warnings={warnings}
             onTimeChange={time => onTimeChange(session.id, time)}
-            onEdit={() => onEdit(session.id)}
+            onSave={onSaveSession}
             onDelete={() => onDelete(session.id)}
             onToggleLock={() => onToggleLock(session.id)}
           />

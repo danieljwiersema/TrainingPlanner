@@ -41,9 +41,16 @@ export function usePlanEditor(plan: DayPlan[], onChange: (plan: DayPlan[]) => vo
     onChange(plan.map(d => ({ ...d, sessions: d.sessions.filter(s => s.locked) })))
   }
 
+  function updateSession(session: Session) {
+    onChange(plan.map(d => ({
+      ...d,
+      sessions: d.sessions.map(s => s.id === session.id ? session : s),
+    })))
+  }
+
   function clearAll() {
     onChange(plan.map(d => ({ ...d, sessions: [] })))
   }
 
-  return { moveSession, saveSession, deleteSession, setSessionTime, toggleLock, clearUnlocked, clearAll }
+  return { moveSession, saveSession, updateSession, deleteSession, setSessionTime, toggleLock, clearUnlocked, clearAll }
 }

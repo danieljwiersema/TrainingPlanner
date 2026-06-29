@@ -7,134 +7,229 @@ const GROQ_MODEL = 'llama-3.3-70b-versatile'
 
 const VALID_ZONES = new Set<Zone>(['recovery', 'easy', 'moderate', 'hard', 'flat out'])
 
-function buildPrompt(config: PlanConfig, existingPlan: DayPlan[], userNote: string): string {
+export interface WizardAnswers {
+  purpose: string
+  level: 'beginner' | 'intermediate' | 'advanced' | 'elite'
+  levelNote: string
+  weaknesses: string[]
+  weaknessNote: string
+  injuries: string
+  setupMode: 'current' | 'ai-decides'
+}
+
+export interface FollowUpQuestion {
+  id: string
+  question: string
+  type: 'select' | 'text'
+  options?: string[]
+}
+
+async function callGroq(messages: { role: string; content: string }[], temperature = 0.3): Promise<string> {
+  const apiKey = import.meta.env.VITE_GROQ_API_KEY as string
+  if (!apiKey) throw new Error('Groq API key not configured — contact the site owner')
+
+  const res = await fetch(GROQ_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({ model: GROQ_MODEL, messages, temperature }),
+  })
+
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('Invalid Groq API key — check console.groq.com')
+    if (res.status === 429) throw new Error('Rate limit reached — wait a moment and try again')
+    const body = await res.text()
+    throw new Error(`Groq error ${res.status}: ${body.slice(0, 120)}`)
+  }
+
+  const data = await res.json() as { choices?: { message: { content: string } }[]; error?: { message: string } }
+  if (data.error) throw new Error(data.error.message)
+  const text = data.choices?.[0]?.message?.content
+  if (!text) throw new Error('Empty response from AI')
+  return text
+}
+
+function parseJSON(text: string): unknown {
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+  return JSON.parse(cleaned)
+}
+
+// ─── Evaluation ──────────────────────────────────────────────────────────────
+
+export async function evaluateWizardAnswers(
+  config: PlanConfig,
+  answers: WizardAnswers,
+): Promise<{ ready: boolean; questions?: FollowUpQuestion[] }> {
+  const focusSport = config.sports.find(s => s.id === config.focus)
+  const sportNames = config.sports.map(s => s.name).join(', ')
+  const totalWeeklyMin = config.dailyMinutes.reduce((a, b) => a + b, 0)
+
+  const prompt = `You are preparing to generate a personalised training plan. Review the athlete's answers and decide if you need 1–2 more targeted questions to make the plan significantly better, or if you have enough to proceed.
+
+ATHLETE ANSWERS:
+  Training purpose: "${answers.purpose}"
+  Experience level: ${answers.level}${answers.levelNote ? ` — specifically: "${answers.levelNote}"` : ''}
+  Weak areas / focus: ${answers.weaknesses.length ? answers.weaknesses.join(', ') : 'none specified'}${answers.weaknessNote ? ` — "${answers.weaknessNote}"` : ''}
+  Injuries / physical constraints: ${answers.injuries.trim() || 'none reported'}
+  Schedule preference: ${answers.setupMode === 'current' ? 'Use current setup exactly' : 'AI redistributes sessions within daily time budgets'}
+
+THEIR CURRENT SETUP:
+  Sports: ${sportNames}
+  Primary focus sport: ${focusSport?.name ?? config.focus}
+  Weekly intensity: ${config.weekIntensity}
+  Total weekly time available: ${totalWeeklyMin}min across ${config.numDays ?? 7} days
+
+Decide: does the purpose + level + focus give you enough to write a genuinely tailored plan? Or would 1–2 specific questions meaningfully improve it?
+
+Only ask follow-up questions if:
+- The purpose mentions a specific event/race (ask timeframe or specific demands)
+- The weaknesses are vague and specifics would change session design
+- There is an obvious gap that would affect session type or intensity choices
+
+Do NOT ask about things already answerable from their setup (sports, times, intensity).
+Do NOT ask more than 2 questions.
+If in doubt, proceed — a good plan is better than extra friction.
+
+Respond with raw JSON only, no markdown:
+{ "ready": true }
+OR
+{ "ready": false, "questions": [{ "id": "q1", "question": "...", "type": "select", "options": ["...", "..."] }, { "id": "q2", "question": "...", "type": "text" }] }`
+
+  const text = await callGroq([
+    { role: 'system', content: 'You are an expert sports coach assistant. Respond with raw JSON only.' },
+    { role: 'user', content: prompt },
+  ], 0.2)
+
+  try {
+    const result = parseJSON(text) as { ready: boolean; questions?: FollowUpQuestion[] }
+    return result
+  } catch {
+    return { ready: true }
+  }
+}
+
+// ─── Plan generation ─────────────────────────────────────────────────────────
+
+function buildPrompt(
+  config: PlanConfig,
+  existingPlan: DayPlan[],
+  answers: WizardAnswers,
+  followUpAnswers: Record<string, string>,
+  followUpQuestions: FollowUpQuestion[],
+): string {
   const numDays = config.numDays ?? 7
-  // Always use existingPlan for locked session context; fall back to emptyPlan for structure only
   const baseDays = emptyPlan(config)
   const days = baseDays.map((base, i) => existingPlan[i] ? { ...base, sessions: existingPlan[i].sessions } : base)
   const focusSport = config.sports.find(s => s.id === config.focus)
+  const aiDecides = answers.setupMode === 'ai-decides'
 
   const sportLines = config.sports.map(sport => {
     const t = config.targets[sport.id]
     if (!t) return null
     const sess = t.sessionsPerWeek === 'auto' ? 'auto' : t.sessionsPerWeek
-    const mins = t.minutesPerWeek ? `, ~${t.minutesPerWeek}min/week total` : ''
+    const mins = t.minutesPerWeek ? `, ~${t.minutesPerWeek}min/week` : ''
     const intens = t.intensity ? `, intensity: ${t.intensity}` : ''
     return `  - ${sport.name} (id: "${sport.id}"): ${sess} sessions/week${mins}${intens}`
   }).filter(Boolean).join('\n')
 
-  // Per-day: show total budget, what's locked (already committed), and how much is left for AI to fill
   const dayLines = days.map((day, i) => {
     const pref = config.preferredStartTimes?.[i]
     const locked = day.sessions.filter(s => s.locked)
     const lockedMin = locked.reduce((sum, s) => sum + s.durationMin, 0)
     const remaining = Math.max(0, day.availableMin - lockedMin)
 
-    if (day.availableMin === 0) return `  - ${day.day} ${day.date}: REST DAY — return empty sessions array`
+    if (day.availableMin === 0) return `  - ${day.day} ${day.date}: REST DAY — empty sessions array`
 
     const lockedDetail = locked.length > 0
-      ? locked.map(s => {
+      ? ` (${lockedMin}min locked: ${locked.map(s => {
           const sp = config.sports.find(sp => sp.id === s.sportId)
           return `${sp?.name ?? s.sportId} ${s.zone} ${s.durationMin}min`
-        }).join(' + ')
-      : null
+        }).join(' + ')})`
+      : ''
 
-    return `  - ${day.day} ${day.date}:${pref ? ` preferred start ${pref},` : ''} ${remaining}min to fill${lockedDetail ? ` (${lockedMin}min already locked: ${lockedDetail})` : ''}`
+    const timeNote = aiDecides
+      ? ` — budget up to ${day.availableMin}min, do not exceed`
+      : ` — fill with ${remaining}min of sessions`
+
+    return `  - ${day.day} ${day.date}:${pref ? ` preferred start ${pref},` : ''}${timeNote}${lockedDetail}`
   }).join('\n')
 
-  // Locked sessions for context only — AI must NOT include these in output
   const lockedContextLines = days.flatMap(day =>
     day.sessions.filter(s => s.locked).map(s => {
       const sp = config.sports.find(sp => sp.id === s.sportId)
-      return `  - ${day.day}: ${sp?.name ?? s.sportId} ${s.zone} ${s.durationMin}min — already scheduled, do not add more of same sport this day unless targets require it`
+      return `  - ${day.day}: ${sp?.name ?? s.sportId} ${s.zone} ${s.durationMin}min [LOCKED — do not include in output]`
     })
   )
 
-  // Existing unlocked sessions for context
-  const existingContextLines = days.flatMap(day =>
-    day.sessions.filter(s => !s.locked).map(s => {
-      const sp = config.sports.find(sp => sp.id === s.sportId)
-      return `  - ${day.day}: ${sp?.name ?? s.sportId} ${s.zone} ${s.durationMin}min (existing, will be replaced by your output)`
-    })
-  )
+  const followUpContext = followUpQuestions.length > 0
+    ? followUpQuestions.map(q => `  - ${q.question}: ${followUpAnswers[q.id] ?? 'not answered'}`).join('\n')
+    : ''
 
-  return `You are an expert endurance sports coach. Generate NEW training sessions to fill each day's remaining time budget.
+  const levelDescriptions: Record<string, string> = {
+    beginner: 'New to training — keep intensity low, prioritise consistency over volume',
+    intermediate: 'Regular trainer — can handle moderate load with some harder sessions',
+    advanced: 'Experienced — periodised training, can sustain high load with proper recovery',
+    elite: 'High-performance athlete — sophisticated periodisation, maximal training stimulus',
+  }
 
-IMPORTANT: Locked sessions are handled automatically — do NOT include them in your JSON output. Only output the NEW sessions you are adding.
+  return `You are an expert sports coach generating a personalised weekly training plan.
 
-ATHLETE CONFIG:
-  Week: ${numDays} days starting ${config.weekStartDate}
-  Focus sport: ${focusSport?.name ?? config.focus} — prioritise with more volume and harder zones
-  Overall intensity: ${config.weekIntensity}
+ATHLETE PROFILE:
+  Goal: "${answers.purpose}"
+  Level: ${answers.level} — ${levelDescriptions[answers.level]}${answers.levelNote ? ` (note: ${answers.levelNote})` : ''}
+  Weak areas / focus: ${answers.weaknesses.length ? answers.weaknesses.join(', ') : 'none specified'}${answers.weaknessNote ? ` — "${answers.weaknessNote}"` : ''}
+  Injuries / physical constraints: ${answers.injuries.trim() || 'none reported'}
+${followUpContext ? `  Additional context:\n${followUpContext}` : ''}
+SCHEDULE MODE: ${aiDecides
+    ? 'AI REDISTRIBUTES — you decide how to allocate sessions within each day\'s budget. Prioritise session quality over filling time. You can leave days partially filled.'
+    : 'FIXED SETUP — fill each day\'s remaining time budget with appropriate sessions.'}
 
-SPORTS & SESSION TARGETS (for the whole week):
+WEEK: ${numDays} days starting ${config.weekStartDate}
+FOCUS SPORT: ${focusSport?.name ?? config.focus} — this sport gets the most attention and harder zones
+OVERALL INTENSITY: ${config.weekIntensity}
+
+SPORTS & WEEKLY TARGETS:
 ${sportLines}
 
-DAILY TIME REMAINING (minutes you need to fill with new sessions):
+DAILY SCHEDULE:
 ${dayLines}
 ${lockedContextLines.length > 0 ? `
-ALREADY LOCKED THIS WEEK (context only — do not output these, do not duplicate these sports on same day unless necessary):
+LOCKED SESSIONS (do NOT include in output — added automatically):
 ${lockedContextLines.join('\n')}
-` : ''}${existingContextLines.length > 0 ? `
-EXISTING UNLOCKED SESSIONS (context only — your output replaces these):
-${existingContextLines.join('\n')}
 ` : ''}
-INTENSITY ZONES — use these exact strings:
-  "recovery"  → Very easy, active recovery
-  "easy"      → Comfortable aerobic, full conversation possible
+INTENSITY ZONES:
+  "recovery"  → Very easy, active recovery only
+  "easy"      → Comfortable aerobic, full conversation
   "moderate"  → Steady/tempo, short sentences only
   "hard"      → Threshold or intervals, barely speaking
   "flat out"  → Maximum effort, VO2max or sprint
 
-COACHING RULES:
-  1. Do not back-to-back hard/flat-out sessions on consecutive days
-  2. Avoid same sport on consecutive days unless targets require it
-  3. New sessions must fit within the remaining time shown above — do not exceed it
-  4. Follow hard sessions with easy or recovery the next day
-  5. Focus sport gets the hardest zones and most sessions
-  6. Rest days (0min) must have an empty sessions array
+COACHING PRINCIPLES for this athlete:
+${answers.level === 'beginner' ? '  - Keep 80%+ of sessions easy or recovery. One moderate session maximum per week.' : ''}
+${answers.level === 'intermediate' ? '  - 70/30 easy-hard ratio. One key hard session, rest easy or moderate.' : ''}
+${answers.level === 'advanced' || answers.level === 'elite' ? '  - Polarised training: most sessions easy, 1-2 genuinely hard sessions, avoid "moderate junk miles".' : ''}
+${answers.purpose.toLowerCase().includes('race') || answers.purpose.toLowerCase().includes('event') || answers.purpose.toLowerCase().includes('compet') ? '  - Race-focused: include race-specific intensity (sport-specific hard sessions). Protect the key session.' : ''}
+${answers.weaknesses.includes('Endurance') ? '  - Endurance focus: longer easy sessions, minimal stopping, time on feet/water/bike.' : ''}
+${answers.weaknesses.includes('Speed') ? '  - Speed focus: include short sharp intervals in focus sport (hard or flat out zone).' : ''}
+${answers.weaknesses.includes('Strength') ? '  - Strength focus: include gym/strength sessions, don\'t skip even if other sports are busy.' : ''}
+${answers.injuries.trim() ? `  - INJURY CONSTRAINT: "${answers.injuries.trim()}" — avoid or modify sessions that aggravate this. Substitute with compatible sports or reduce load on affected days.` : ''}  - Never schedule back-to-back hard or flat-out sessions
+  - Follow hard sessions with easy or recovery next day
+  - Focus sport gets priority scheduling on best days
 
-ATHLETE NOTE: "${userNote || 'none'}"
-
-OUTPUT FORMAT — return this exact structure, raw JSON only, no markdown:
-[
-  {
-    "day": "Mon",
-    "date": "${days[0]?.date ?? 'YYYY-MM-DD'}",
-    "availableMin": 60,
-    "sessions": [
-      { "id": "a1b2c3d", "sportId": "run", "zone": "easy", "durationMin": 45 }
-    ]
-  }
-]
-
-Rules:
-- Return exactly ${numDays} day objects in the array
-- Valid sportId values: ${config.sports.map(s => `"${s.id}"`).join(', ')}
-- Valid zone values: "recovery", "easy", "moderate", "hard", "flat out"
-- id must be a unique 7-character alphanumeric string
-- startTime (optional, e.g. "07:00") only if a preferred start time applies
-- Days with 0 remaining time must have an empty sessions array []
-- Do NOT include locked sessions — they are added automatically`
+OUTPUT: Raw JSON array only — no markdown, no explanation.
+Return exactly ${numDays} day objects. Each day has "day", "date", "availableMin", "sessions".
+Each session: { "id": "7chars", "sportId": "...", "zone": "...", "durationMin": N, "startTime": "HH:MM" (optional) }
+Valid sportIds: ${config.sports.map(s => `"${s.id}"`).join(', ')}
+Valid zones: "recovery", "easy", "moderate", "hard", "flat out"
+Do NOT include locked sessions. Do NOT exceed daily availableMin.`
 }
 
-function parseAndValidate(input: string | unknown[], config: PlanConfig, existingPlan: DayPlan[]): DayPlan[] {
-  let parsed: unknown[]
-  if (Array.isArray(input)) {
-    parsed = input
-  } else {
-    const cleaned = input.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
-    parsed = JSON.parse(cleaned) as unknown[]
-  }
-
-  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('AI returned non-array response')
-
+function parseAndValidate(input: unknown[], config: PlanConfig, existingPlan: DayPlan[]): DayPlan[] {
   const numDays = config.numDays ?? 7
-  if (parsed.length !== numDays) throw new Error(`Expected ${numDays} days, got ${parsed.length}`)
+  if (input.length !== numDays) throw new Error(`Expected ${numDays} days, got ${input.length}`)
 
   const validIds = new Set(config.sports.map(s => s.id))
 
-  return (parsed as Record<string, unknown>[]).map((day, i) => {
+  return (input as Record<string, unknown>[]).map((day, i) => {
     if (!day['day'] || !day['date'] || !Array.isArray(day['sessions'])) {
       throw new Error(`Day ${i} missing required fields`)
     }
@@ -172,55 +267,18 @@ function parseAndValidate(input: string | unknown[], config: PlanConfig, existin
 export async function generatePlanWithAI(
   config: PlanConfig,
   existingPlan: DayPlan[],
-  userNote: string,
+  answers: WizardAnswers,
+  followUpAnswers: Record<string, string>,
+  followUpQuestions: FollowUpQuestion[],
 ): Promise<DayPlan[]> {
-  const apiKey = import.meta.env.VITE_GROQ_API_KEY as string
-  if (!apiKey) throw new Error('Groq API key not configured — contact the site owner')
+  const prompt = buildPrompt(config, existingPlan, answers, followUpAnswers, followUpQuestions)
 
-  const res = await fetch(GROQ_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert endurance sports coach. Output only raw JSON with no markdown fences, no explanation, nothing else.',
-        },
-        {
-          role: 'user',
-          content: buildPrompt(config, existingPlan, userNote),
-        },
-      ],
-      temperature: 0.3,
-    }),
-  })
+  const text = await callGroq([
+    { role: 'system', content: 'You are an expert sports coach. Output only raw JSON — no markdown, no explanation.' },
+    { role: 'user', content: prompt },
+  ], 0.3)
 
-  if (!res.ok) {
-    if (res.status === 401) throw new Error('Invalid Groq API key — check console.groq.com')
-    if (res.status === 429) throw new Error('Rate limit reached — wait a moment and try again')
-    if (res.status === 402) throw new Error('Groq API quota exceeded — check console.groq.com')
-    const body = await res.text()
-    throw new Error(`Groq error ${res.status}: ${body.slice(0, 120)}`)
-  }
-
-  const data = await res.json() as {
-    choices?: { message: { content: string } }[]
-    error?: { message: string }
-  }
-
-  if (data.error) throw new Error(data.error.message)
-
-  const text = data.choices?.[0]?.message?.content
-  if (!text) throw new Error('Empty response from AI')
-
-  // Strip any accidental markdown fences
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
-
-  // Model might wrap array in an object — unwrap any common key
   const raw = JSON.parse(cleaned)
   const planArray: unknown[] = Array.isArray(raw)
     ? raw

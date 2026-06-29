@@ -31,11 +31,9 @@ interface Props {
   onChange: (config: PlanConfig) => void
   onShowTemplates: () => void
   aiError: string | null
-  aiPrompt: string
-  onAiPromptChange: (v: string) => void
 }
 
-export function SetupPanel({ config, onChange, onShowTemplates, aiError, aiPrompt, onAiPromptChange }: Props) {
+export function SetupPanel({ config, onChange, onShowTemplates, aiError }: Props) {
   const [showAddSport, setShowAddSport] = useState(false)
 
   function setDay(i: number, val: string) {
@@ -244,21 +242,9 @@ export function SetupPanel({ config, onChange, onShowTemplates, aiError, aiPromp
           </div>
         </div>
 
-        {/* AI note — buttons moved to top of plan view */}
-        <div className="border-t border-gray-100 pt-4 space-y-2">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">✨ AI Note</p>
-          <p className="text-xs text-gray-400">Tip for AI Generate button above ↑</p>
-          <textarea
-            value={aiPrompt}
-            onChange={e => onAiPromptChange(e.target.value)}
-            placeholder="e.g. 'Race on Sunday, no hard sessions Friday'"
-            rows={2}
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-600 placeholder-gray-300"
-          />
-          {aiError && (
-            <p className="text-xs text-red-500 bg-red-50 rounded-lg px-2.5 py-1.5 leading-snug">{aiError}</p>
-          )}
-        </div>
+        {aiError && (
+          <p className="text-xs text-red-500 bg-red-50 rounded-lg px-2.5 py-2 leading-snug border border-red-100">{aiError}</p>
+        )}
       </div>
     </div>
   )

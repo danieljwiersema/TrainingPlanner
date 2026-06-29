@@ -3,7 +3,9 @@ import type { PlanConfig, DayPlan, PlanWarning } from './lib/types'
 import { DEFAULT_SPORTS } from './lib/types'
 import { generatePlan, emptyPlan, addDays } from './lib/scheduler'
 import { validatePlan } from './lib/validator'
-import { generatePlanWithAI } from './lib/aiPlanner'
+import { generatePlanWithAI, evaluateWizardAnswers } from './lib/aiPlanner'
+import type { WizardAnswers, FollowUpQuestion } from './lib/aiPlanner'
+import { AIWizard } from './components/AIWizard'
 import { useGoogleCalendar } from './hooks/useGoogleCalendar'
 import { SetupPanel } from './components/SetupPanel'
 import { WeeklyGrid } from './components/WeeklyGrid'
@@ -63,16 +65,22 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
-  const [aiPrompt, setAiPrompt] = useState('')
+  const [showAIWizard, setShowAIWizard] = useState(false)
 
-  async function handleAIGenerate(prompt: string) {
+  async function handleAIEvaluate(answers: WizardAnswers) {
+    return evaluateWizardAnswers(config, answers)
+  }
+
+  async function handleAIGenerate(answers: WizardAnswers, followUpAnswers: Record<string, string>, followUpQuestions: FollowUpQuestion[]) {
     setAiLoading(true)
     setAiError(null)
     try {
-      const result = await generatePlanWithAI(config, plan, prompt)
+      const result = await generatePlanWithAI(config, plan, answers, followUpAnswers, followUpQuestions)
       applyPlan(result)
+      setShowAIWizard(false)
     } catch (e) {
       setAiError(e instanceof Error ? e.message : 'AI generation failed')
+      setShowAIWizard(false)
     } finally {
       setAiLoading(false)
     }
@@ -238,8 +246,6 @@ export default function App() {
               onChange={handleConfigChange}
               onShowTemplates={() => setShowTemplates(true)}
               aiError={aiError}
-              aiPrompt={aiPrompt}
-              onAiPromptChange={setAiPrompt}
             />
           </div>
         )}
@@ -253,7 +259,7 @@ export default function App() {
               onChange={applyPlan}
               onGenerate={handleGenerate}
               onRegenerate={() => applyPlan(generatePlan(config, plan))}
-              onAIGenerate={() => handleAIGenerate(aiPrompt)}
+              onOpenAIWizard={() => setShowAIWizard(true)}
               aiLoading={aiLoading}
               onUndo={undo}
               canUndo={history.length > 0}
@@ -265,6 +271,15 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {showAIWizard && (
+        <AIWizard
+          config={config}
+          onEvaluate={handleAIEvaluate}
+          onGenerate={handleAIGenerate}
+          onClose={() => setShowAIWizard(false)}
+        />
+      )}
 
       {showTemplates && (
         <TemplateSelector

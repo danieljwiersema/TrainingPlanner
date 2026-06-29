@@ -17,7 +17,7 @@ interface Props {
   onChange: (plan: DayPlan[]) => void
   onGenerate: () => void
   onRegenerate: () => void
-  onAIGenerate: () => void
+  onOpenAIWizard: () => void
   aiLoading: boolean
   onUndo: () => void
   canUndo: boolean
@@ -31,7 +31,7 @@ function formatMin(min: number): string {
   return `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ''}`
 }
 
-export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onRegenerate, onAIGenerate, aiLoading, onUndo, canUndo, onCopyWeek, gcalEvents }: Props) {
+export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onRegenerate, onOpenAIWizard, aiLoading, onUndo, canUndo, onCopyWeek, gcalEvents }: Props) {
   const [editing, setEditing] = useState<EditTarget | null>(null)
   const { moveSession, saveSession, updateSession, deleteSession, setSessionTime, toggleLock, clearUnlocked, clearAll } = usePlanEditor(plan, onChange)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
@@ -73,7 +73,7 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onReg
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition-colors"
         >Generate Plan</button>
         <button
-          onClick={onAIGenerate}
+          onClick={onOpenAIWizard}
           disabled={aiLoading}
           className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white font-bold rounded-xl text-sm transition-colors flex items-center gap-2"
         >

@@ -2,8 +2,8 @@ import type { DayPlan, PlanConfig, Session, Zone } from './types'
 import { getLabel } from './labelUtils'
 import { emptyPlan } from './scheduler'
 
-const GROK_URL = 'https://api.x.ai/v1/chat/completions'
-const GROK_MODEL = 'grok-3-mini'
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
+const GROQ_MODEL = 'llama-3.3-70b-versatile'
 
 const VALID_ZONES = new Set<Zone>(['recovery', 'easy', 'moderate', 'hard', 'flat out'])
 
@@ -145,17 +145,17 @@ export async function generatePlanWithAI(
   existingPlan: DayPlan[],
   userNote: string,
 ): Promise<DayPlan[]> {
-  const apiKey = import.meta.env.VITE_GROK_API_KEY as string
-  if (!apiKey) throw new Error('Grok API key not configured — contact the site owner')
+  const apiKey = import.meta.env.VITE_GROQ_API_KEY as string
+  if (!apiKey) throw new Error('Groq API key not configured — contact the site owner')
 
-  const res = await fetch(GROK_URL, {
+  const res = await fetch(GROQ_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: GROK_MODEL,
+      model: GROQ_MODEL,
       messages: [
         {
           role: 'system',
@@ -172,11 +172,11 @@ export async function generatePlanWithAI(
   })
 
   if (!res.ok) {
-    if (res.status === 401) throw new Error('Invalid Grok API key — check console.x.ai')
+    if (res.status === 401) throw new Error('Invalid Groq API key — check console.groq.com')
     if (res.status === 429) throw new Error('Rate limit reached — wait a moment and try again')
-    if (res.status === 402) throw new Error('Grok API quota exceeded — check your xAI billing')
+    if (res.status === 402) throw new Error('Groq API quota exceeded — check console.groq.com')
     const body = await res.text()
-    throw new Error(`Grok error ${res.status}: ${body.slice(0, 120)}`)
+    throw new Error(`Groq error ${res.status}: ${body.slice(0, 120)}`)
   }
 
   const data = await res.json() as {

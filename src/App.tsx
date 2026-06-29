@@ -63,6 +63,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [aiPrompt, setAiPrompt] = useState('')
 
   async function handleAIGenerate(prompt: string) {
     setAiLoading(true)
@@ -235,11 +236,10 @@ export default function App() {
             <SetupPanel
               config={config}
               onChange={handleConfigChange}
-              onGenerate={handleGenerate}
               onShowTemplates={() => setShowTemplates(true)}
-              onAIGenerate={handleAIGenerate}
-              aiLoading={aiLoading}
               aiError={aiError}
+              aiPrompt={aiPrompt}
+              onAiPromptChange={setAiPrompt}
             />
           </div>
         )}
@@ -251,7 +251,10 @@ export default function App() {
               warnings={warnings}
               config={config}
               onChange={applyPlan}
+              onGenerate={handleGenerate}
               onRegenerate={() => applyPlan(generatePlan(config, plan))}
+              onAIGenerate={() => handleAIGenerate(aiPrompt)}
+              aiLoading={aiLoading}
               onUndo={undo}
               canUndo={history.length > 0}
               onCopyWeek={copyWeekForward}

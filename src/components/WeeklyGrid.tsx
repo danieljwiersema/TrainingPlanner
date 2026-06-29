@@ -15,7 +15,10 @@ interface Props {
   warnings: PlanWarning[]
   config: PlanConfig
   onChange: (plan: DayPlan[]) => void
+  onGenerate: () => void
   onRegenerate: () => void
+  onAIGenerate: () => void
+  aiLoading: boolean
   onUndo: () => void
   canUndo: boolean
   onCopyWeek: () => void
@@ -28,7 +31,7 @@ function formatMin(min: number): string {
   return `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ''}`
 }
 
-export function WeeklyGrid({ plan, warnings, config, onChange, onRegenerate, onUndo, canUndo, onCopyWeek, gcalEvents }: Props) {
+export function WeeklyGrid({ plan, warnings, config, onChange, onGenerate, onRegenerate, onAIGenerate, aiLoading, onUndo, canUndo, onCopyWeek, gcalEvents }: Props) {
   const [editing, setEditing] = useState<EditTarget | null>(null)
   const { moveSession, saveSession, updateSession, deleteSession, setSessionTime, toggleLock, clearUnlocked, clearAll } = usePlanEditor(plan, onChange)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
@@ -63,6 +66,30 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onRegenerate, onU
 
   return (
     <div className="flex flex-col gap-4 h-full">
+      {/* Generate buttons — top of screen */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={onGenerate}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition-colors"
+        >Generate Plan</button>
+        <button
+          onClick={onAIGenerate}
+          disabled={aiLoading}
+          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white font-bold rounded-xl text-sm transition-colors flex items-center gap-2"
+        >
+          {aiLoading
+            ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Generating…</>
+            : '✨ AI Generate'}
+        </button>
+        {sessionCount > 0 && (
+          <button
+            onClick={onRegenerate}
+            title="Keep locked sessions, regenerate everything else"
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-sm transition-colors"
+          >🔄 Regenerate</button>
+        )}
+      </div>
+
       <div className="flex items-center gap-3 flex-wrap">
         {sessionCount > 0 && (
           <>
@@ -102,11 +129,6 @@ export function WeeklyGrid({ plan, warnings, config, onChange, onRegenerate, onU
           )}
           {sessionCount > 0 && (
             <>
-              <button
-                onClick={onRegenerate}
-                title="Keep locked sessions, regenerate everything else"
-                className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold flex items-center gap-1.5"
-              >🔄 Regenerate</button>
               <button
                 onClick={onCopyWeek}
                 title="Copy all sessions to next week"

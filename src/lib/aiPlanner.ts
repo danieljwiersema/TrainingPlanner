@@ -96,12 +96,26 @@ COACHING RULES:
 
 ATHLETE NOTE: "${userNote || 'none'}"
 
-Return ONLY a JSON array with exactly ${numDays} elements — no markdown, no explanation.
-Each element has "day", "date", "availableMin", and "sessions" (new sessions only, not locked ones).
+OUTPUT FORMAT — return this exact structure, raw JSON only, no markdown:
+[
+  {
+    "day": "Mon",
+    "date": "${days[0]?.date ?? 'YYYY-MM-DD'}",
+    "availableMin": 60,
+    "sessions": [
+      { "id": "a1b2c3d", "sportId": "run", "zone": "easy", "durationMin": 45 }
+    ]
+  }
+]
 
-Valid sportId values: ${config.sports.map(s => `"${s.id}"`).join(', ')}
-Valid zone values: "recovery", "easy", "moderate", "hard", "flat out"
-Each session needs: id (7-char alphanumeric), sportId, zone, durationMin. startTime is optional.`
+Rules:
+- Return exactly ${numDays} day objects in the array
+- Valid sportId values: ${config.sports.map(s => `"${s.id}"`).join(', ')}
+- Valid zone values: "recovery", "easy", "moderate", "hard", "flat out"
+- id must be a unique 7-character alphanumeric string
+- startTime (optional, e.g. "07:00") only if a preferred start time applies
+- Days with 0 remaining time must have an empty sessions array []
+- Do NOT include locked sessions — they are added automatically`
 }
 
 function parseAndValidate(input: string | unknown[], config: PlanConfig, existingPlan: DayPlan[]): DayPlan[] {
@@ -174,15 +188,14 @@ export async function generatePlanWithAI(
       messages: [
         {
           role: 'system',
-          content: 'You are an expert endurance sports coach. Always respond with valid JSON only — no markdown, no explanation.',
+          content: 'You are an expert endurance sports coach. Output only raw JSON with no markdown fences, no explanation, nothing else.',
         },
         {
           role: 'user',
           content: buildPrompt(config, existingPlan, userNote),
         },
       ],
-      temperature: 0.4,
-      response_format: { type: 'json_object' },
+      temperature: 0.3,
     }),
   })
 
@@ -204,10 +217,16 @@ export async function generatePlanWithAI(
   const text = data.choices?.[0]?.message?.content
   if (!text) throw new Error('Empty response from AI')
 
-  // Grok with response_format:json_object returns a wrapped object — unwrap if needed
-  const parsed = JSON.parse(text)
-  const planArray = Array.isArray(parsed) ? parsed : (parsed.plan ?? parsed.days ?? parsed.schedule ?? Object.values(parsed)[0])
-  if (!Array.isArray(planArray)) throw new Error('AI returned unexpected JSON shape')
+  // Strip any accidental markdown fences
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
 
-  return parseAndValidate(planArray as unknown[], config, existingPlan)
+  // Model might wrap array in an object — unwrap any common key
+  const raw = JSON.parse(cleaned)
+  const planArray: unknown[] = Array.isArray(raw)
+    ? raw
+    : (raw.days ?? raw.plan ?? raw.schedule ?? raw.week ?? Object.values(raw as Record<string, unknown>).find(v => Array.isArray(v))) as unknown[]
+
+  if (!Array.isArray(planArray) || planArray.length === 0) throw new Error('AI returned unexpected JSON shape — try again')
+
+  return parseAndValidate(planArray, config, existingPlan)
 }
